@@ -1,0 +1,13 @@
+{
+  "solution": {
+    "path": "DotRecast.sln",
+    "projects": [
+      "src\\DotRecast.Core\\DotRecast.Core.csproj",
+      "src\\DotRecast.Recast\\DotRecast.Recast.csproj",
+      "src\\DotRecast.Detour\\DotRecast.Detour.csproj",
+      "test\\DotRecast.Core.Test\\DotRecast.Core.Test.csproj",
+      "test\\DotRecast.Recast.Test\\DotRecast.Recast.Test.csproj",
+      "test\\DotRecast.Detour.Test\\DotRecast.Detour.Test.csproj"
+    ]
+  }
+}
