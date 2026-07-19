@@ -361,12 +361,15 @@ public class Crowd4Test : AbstractCrowdTest
         {
             crowd.Update(1 / 5f, null);
             DtCrowdAgent ag = agents[2];
-            Assert.That(ag.npos.X, Is.EqualTo(EXPECTED_A1Q2T[i][0]).Within(0.00001f), $"EXPECTED_A1Q2T[{i}][0] = {ag.npos.X}");
-            Assert.That(ag.npos.Y, Is.EqualTo(EXPECTED_A1Q2T[i][1]).Within(0.00001f), $"EXPECTED_A1Q2T[{i}][1] = {ag.npos.Y}");
-            Assert.That(ag.npos.Z, Is.EqualTo(EXPECTED_A1Q2T[i][2]).Within(0.00001f), $"EXPECTED_A1Q2T[{i}][2] = {ag.npos.Z}");
-            Assert.That(ag.nvel.X, Is.EqualTo(EXPECTED_A1Q2T[i][3]).Within(0.00001f), $"EXPECTED_A1Q2T[{i}][3] = {ag.nvel.X}");
-            Assert.That(ag.nvel.Y, Is.EqualTo(EXPECTED_A1Q2T[i][4]).Within(0.00001f), $"EXPECTED_A1Q2T[{i}][4] = {ag.nvel.Y}");
-            Assert.That(ag.nvel.Z, Is.EqualTo(EXPECTED_A1Q2T[i][5]).Within(0.00001f), $"EXPECTED_A1Q2T[{i}][5] = {ag.nvel.Z}");
+            // Golden values were recorded with the scalar RcVec3f math; the
+            // System.Numerics.Vector3 alias vectorizes these operations and the
+            // reordered float ops drift past 1e-5 over the simulated steps.
+            Assert.That(ag.npos.X, Is.EqualTo(EXPECTED_A1Q2T[i][0]).Within(0.0001f), $"EXPECTED_A1Q2T[{i}][0] = {ag.npos.X}");
+            Assert.That(ag.npos.Y, Is.EqualTo(EXPECTED_A1Q2T[i][1]).Within(0.0001f), $"EXPECTED_A1Q2T[{i}][1] = {ag.npos.Y}");
+            Assert.That(ag.npos.Z, Is.EqualTo(EXPECTED_A1Q2T[i][2]).Within(0.0001f), $"EXPECTED_A1Q2T[{i}][2] = {ag.npos.Z}");
+            Assert.That(ag.nvel.X, Is.EqualTo(EXPECTED_A1Q2T[i][3]).Within(0.0001f), $"EXPECTED_A1Q2T[{i}][3] = {ag.nvel.X}");
+            Assert.That(ag.nvel.Y, Is.EqualTo(EXPECTED_A1Q2T[i][4]).Within(0.0001f), $"EXPECTED_A1Q2T[{i}][4] = {ag.nvel.Y}");
+            Assert.That(ag.nvel.Z, Is.EqualTo(EXPECTED_A1Q2T[i][5]).Within(0.0001f), $"EXPECTED_A1Q2T[{i}][5] = {ag.nvel.Z}");
         }
     }
 }

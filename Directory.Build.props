@@ -4,4 +4,11 @@
     <LangVersion>latest</LangVersion>
   </PropertyGroup>
 
+  <!-- RcVec3f is System.Numerics.Vector3: identical layout (3 public float
+       fields) and member-for-member API surface; the alias swaps every use
+       site to the SIMD-accelerated BCL type without touching source files. -->
+  <ItemGroup>
+    <Using Include="System.Numerics.Vector3" Alias="RcVec3f" />
+  </ItemGroup>
+
 </Project>
