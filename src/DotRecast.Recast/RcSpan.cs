@@ -21,12 +21,19 @@ freely, subject to the following restrictions:
 namespace DotRecast.Recast
 {
     /// Represents a span in a heightfield.
+    ///
+    /// A value type stored in an <see cref="RcSpanStore"/> page and linked by
+    /// index rather than by reference, mirroring the C++ rcSpan/rcSpanPool
+    /// layout. As a class this cost one heap object per (triangle, cell)
+    /// incidence - hundreds of thousands per tile - and turned every column
+    /// walk into a chain of dependent loads.
+    ///
     /// @see rcHeightfield
-    public class RcSpan
+    public struct RcSpan
     {
         public int smin; //< The lower limit of the span. (Inclusive) [Limit: < #smax]
         public int smax; //< The upper limit of the span. (Exclusive) [Limit: <= #RC_SPAN_MAX_HEIGHT]
         public int area; //< The area id assigned to the span.
-        public RcSpan next; //< The next span higher up in column.
+        public int next; //< Index of the next span higher up in column, or RcSpanStore.Nil.
     }
 }

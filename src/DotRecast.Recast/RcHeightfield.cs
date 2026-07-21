@@ -32,15 +32,16 @@ namespace DotRecast.Recast
         public RcVec3f bmax; //< The maximum bounds in world space. [(x, y, z)]
         public readonly float cs; //< The size of each cell. (On the xz-plane.)
         public readonly float ch; //< The height of each cell. (The minimum increment along the y-axis.)
-        public readonly RcSpan[] spans; //< Heightfield of spans (width*height).
+        /// Index of the first span in each column, or RcSpanStore.Nil.
+        /// (width*height)
+        public readonly int[] spans;
 
-        // memory pool for rcSpan instances.
-        public RcSpanPool pools; //< Linked list of span pools. (legacy, unused)
-        public RcSpan freelist; //< The next free span. (legacy, unused)
+        /// Backing storage for every span in this heightfield.
+        public readonly RcSpanStore SpanStore = new RcSpanStore();
 
-        /// Default pooled span source for single-threaded rasterization.
-        /// Parallel rasterization gives each band its own allocator instead.
-        public readonly RcSpanAllocator SpanAllocator = new RcSpanAllocator();
+        /// Default span source for single-threaded rasterization. Parallel
+        /// rasterization gives each band its own allocator over the same store.
+        public readonly RcSpanAllocator SpanAllocator;
 
         /** Border size in cell units */
         public readonly int borderSize;
@@ -54,7 +55,14 @@ namespace DotRecast.Recast
             this.cs = cs;
             this.ch = ch;
             this.borderSize = borderSize;
-            spans = new RcSpan[width * height];
+
+            SpanAllocator = new RcSpanAllocator(SpanStore);
+
+            spans = new int[width * height];
+            for (int i = 0; i < spans.Length; ++i)
+            {
+                spans[i] = RcSpanStore.Nil;
+            }
         }
     }
 }

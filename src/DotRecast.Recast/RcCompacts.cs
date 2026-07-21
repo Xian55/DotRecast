@@ -55,6 +55,8 @@ namespace DotRecast.Recast
         /// @returns True if the operation completed successfully.
         public static RcCompactHeightfield BuildCompactHeightfield(RcContext context, int walkableHeight, int walkableClimb, RcHeightfield heightfield)
         {
+            RcSpanStore store = heightfield.SpanStore;
+
             using var timer = context.ScopedTimer(RcTimerLabel.RC_TIMER_BUILD_COMPACTHEIGHTFIELD);
 
             int xSize = heightfield.width;
@@ -94,20 +96,20 @@ namespace DotRecast.Recast
             int numColumns = xSize * zSize;
             for (int columnIndex = 0; columnIndex < numColumns; ++columnIndex)
             {
-                RcSpan span = heightfield.spans[columnIndex];
+                int span = heightfield.spans[columnIndex];
 
                 // If there are no spans at this cell, just leave the data to index=0, count=0.
-                if (span == null)
+                if (span == RcSpanStore.Nil)
                     continue;
 
                 int tmpIdx = currentCellIndex;
                 int tmpCount = 0;
-                for (; span != null; span = span.next)
+                for (; span != RcSpanStore.Nil; span = store[span].next)
                 {
-                    if (span.area != RC_NULL_AREA)
+                    if (store[span].area != RC_NULL_AREA)
                     {
-                        int bot = span.smax;
-                        int top = span.next != null ? (int)span.next.smin : MAX_HEIGHT;
+                        int bot = store[span].smax;
+                        int top = store[span].next != RcSpanStore.Nil ? (int)store[store[span].next].smin : MAX_HEIGHT;
                         ref RcCompactSpanBuilder builder = ref tempSpans[currentCellIndex];
                         builder.y = Math.Clamp(bot, 0, MAX_HEIGHT);
                         builder.h = Math.Clamp(top - bot, 0, MAX_HEIGHT);
@@ -119,7 +121,7 @@ namespace DotRecast.Recast
                         builder.reg = 0;
                         builder.con = 0;
 
-                        compactHeightfield.areas[currentCellIndex] = span.area;
+                        compactHeightfield.areas[currentCellIndex] = store[span].area;
                         currentCellIndex++;
                         tmpCount++;
                     }
@@ -249,13 +251,15 @@ namespace DotRecast.Recast
         ///  @returns The number of spans in the heightfield.
         private static int GetHeightFieldSpanCount(RcContext context, RcHeightfield heightfield)
         {
+            RcSpanStore store = heightfield.SpanStore;
+
             int numCols = heightfield.width * heightfield.height;
             int spanCount = 0;
             for (int columnIndex = 0; columnIndex < numCols; ++columnIndex)
             {
-                for (RcSpan span = heightfield.spans[columnIndex]; span != null; span = span.next)
+                for (int span = heightfield.spans[columnIndex]; span != RcSpanStore.Nil; span = store[span].next)
                 {
-                    if (span.area != RC_NULL_AREA)
+                    if (store[span].area != RC_NULL_AREA)
                     {
                         spanCount++;
                     }

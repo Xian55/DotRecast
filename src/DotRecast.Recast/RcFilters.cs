@@ -47,6 +47,8 @@ namespace DotRecast.Recast
         /// @param[in,out]	heightfield		A fully built heightfield.  (All spans have been added.)
         public static void FilterLowHangingWalkableObstacles(RcContext context, int walkableClimb, RcHeightfield heightfield)
         {
+            RcSpanStore store = heightfield.SpanStore;
+
             using var timer = context.ScopedTimer(RcTimerLabel.RC_TIMER_FILTER_LOW_OBSTACLES);
 
             int xSize = heightfield.width;
@@ -56,25 +58,25 @@ namespace DotRecast.Recast
             {
                 for (int x = 0; x < xSize; ++x)
                 {
-                    RcSpan previousSpan = null;
+                    int previousSpan = RcSpanStore.Nil;
                     bool previousWasWalkable = false;
                     int previousAreaID = RC_NULL_AREA;
 
                     // For each span in the column...
-                    for (RcSpan span = heightfield.spans[x + z * xSize]; span != null; previousSpan = span, span = span.next)
+                    for (int span = heightfield.spans[x + z * xSize]; span != RcSpanStore.Nil; previousSpan = span, span = store[span].next)
                     {
-                        bool walkable = span.area != RC_NULL_AREA;
+                        bool walkable = store[span].area != RC_NULL_AREA;
                         // If current span is not walkable, but there is walkable span just below it and the height difference
                         // is small enough for the agent to walk over, mark the current span as walkable too.
-                        if (!walkable && previousWasWalkable && span.smax - previousSpan.smax <= walkableClimb)
+                        if (!walkable && previousWasWalkable && store[span].smax - store[previousSpan].smax <= walkableClimb)
                         {
-                            span.area = previousAreaID;
+                            store[span].area = previousAreaID;
                         }
 
                         // Copy the original walkable value regardless of whether we changed it.
                         // This prevents multiple consecutive non-walkable spans from being erroneously marked as walkable.
                         previousWasWalkable = walkable;
-                        previousAreaID = span.area;
+                        previousAreaID = store[span].area;
                     }
                 }
             }
@@ -87,7 +89,7 @@ namespace DotRecast.Recast
         /// This method removes the impact of the overestimation of conservative voxelization 
         /// so the resulting mesh will not have regions hanging in the air over ledges.
         /// 
-        /// A span is a ledge if: <tt>rcAbs(currentSpan.smax - neighborSpan.smax) > walkableClimb</tt>
+        /// A span is a ledge if: <tt>rcAbs(store[currentSpan].smax - store[neighborSpan].smax) > walkableClimb</tt>
         /// 
         /// @see rcHeightfield, rcConfig
         /// 
@@ -100,6 +102,8 @@ namespace DotRecast.Recast
         /// @param[in,out]	heightfield			A fully built heightfield.  (All spans have been added.)
         public static void FilterLedgeSpans(RcContext context, int walkableHeight, int walkableClimb, RcHeightfield heightfield)
         {
+            RcSpanStore store = heightfield.SpanStore;
+
             using var timer = context.ScopedTimer(RcTimerLabel.RC_TIMER_FILTER_BORDER);
 
             int xSize = heightfield.width;
@@ -110,16 +114,16 @@ namespace DotRecast.Recast
             {
                 for (int x = 0; x < xSize; ++x)
                 {
-                    for (RcSpan span = heightfield.spans[x + z * xSize]; span != null; span = span.next)
+                    for (int span = heightfield.spans[x + z * xSize]; span != RcSpanStore.Nil; span = store[span].next)
                     {
                         // Skip non-walkable spans.
-                        if (span.area == RC_NULL_AREA)
+                        if (store[span].area == RC_NULL_AREA)
                         {
                             continue;
                         }
 
-                        int floor = (span.smax);
-                        int ceiling = span.next != null ? span.next.smin : RC_SPAN_MAX_HEIGHT;
+                        int floor = (store[span].smax);
+                        int ceiling = store[span].next != RcSpanStore.Nil ? store[store[span].next].smin : RC_SPAN_MAX_HEIGHT;
 
                         // The difference between this walkable area and the lowest neighbor walkable area.
                         // This is the difference between the current span and all neighbor spans that have
@@ -127,8 +131,8 @@ namespace DotRecast.Recast
                         int lowestNeighborFloorDifference = RC_SPAN_MAX_HEIGHT;
 
                         // Min and max height of accessible neighbours.
-                        int lowestTraversableNeighborFloor = span.smax;
-                        int highestTraversableNeighborFloor = span.smax;
+                        int lowestTraversableNeighborFloor = store[span].smax;
+                        int highestTraversableNeighborFloor = store[span].smax;
 
                         for (int direction = 0; direction < 4; ++direction)
                         {
@@ -142,11 +146,11 @@ namespace DotRecast.Recast
                                 break;
                             }
 
-                            RcSpan neighborSpan = heightfield.spans[neighborX + neighborZ * xSize];
+                            int neighborSpan = heightfield.spans[neighborX + neighborZ * xSize];
 
                             // The most we can step down to the neighbor is the walkableClimb distance.
                             // Start with the area under the neighbor span                            
-                            int neighborCeiling = neighborSpan != null ? neighborSpan.smin : RC_SPAN_MAX_HEIGHT;
+                            int neighborCeiling = neighborSpan != RcSpanStore.Nil ? store[neighborSpan].smin : RC_SPAN_MAX_HEIGHT;
 
                             // Skip neightbour if the gap between the spans is too small.
                             if (Math.Min(ceiling, neighborCeiling) - floor >= walkableHeight)
@@ -156,10 +160,10 @@ namespace DotRecast.Recast
                             }
 
                             // For each span in the neighboring column...
-                            for (; neighborSpan != null; neighborSpan = neighborSpan.next)
+                            for (; neighborSpan != RcSpanStore.Nil; neighborSpan = store[neighborSpan].next)
                             {
-                                int neighborFloor = neighborSpan.smax;
-                                neighborCeiling = neighborSpan.next != null ? neighborSpan.next.smin : RC_SPAN_MAX_HEIGHT;
+                                int neighborFloor = store[neighborSpan].smax;
+                                neighborCeiling = store[neighborSpan].next != RcSpanStore.Nil ? store[store[neighborSpan].next].smin : RC_SPAN_MAX_HEIGHT;
 
                                 // Only consider neighboring areas that have enough overlap to be potentially traversable.
                                 if (Math.Min(ceiling, neighborCeiling) - Math.Max(floor, neighborFloor) < walkableHeight)
@@ -193,12 +197,12 @@ namespace DotRecast.Recast
                         // the magnitude of the delta)
                         if (lowestNeighborFloorDifference < -walkableClimb)
                         {
-                            span.area = RC_NULL_AREA;
+                            store[span].area = RC_NULL_AREA;
                         }
                         // If the difference between all neighbor floors is too large, this is a steep slope, so mark the span as an unwalkable ledge.
                         else if ((highestTraversableNeighborFloor - lowestTraversableNeighborFloor) > walkableClimb)
                         {
-                            span.area = RC_NULL_AREA;
+                            store[span].area = RC_NULL_AREA;
                         }
                     }
                 }
@@ -221,6 +225,8 @@ namespace DotRecast.Recast
         /// @param[in,out]	heightfield		A fully built heightfield.  (All spans have been added.)
         public static void FilterWalkableLowHeightSpans(RcContext context, int walkableHeight, RcHeightfield heightfield)
         {
+            RcSpanStore store = heightfield.SpanStore;
+
             using var timer = context.ScopedTimer(RcTimerLabel.RC_TIMER_FILTER_WALKABLE);
 
             int xSize = heightfield.width;
@@ -232,13 +238,13 @@ namespace DotRecast.Recast
             {
                 for (int x = 0; x < xSize; ++x)
                 {
-                    for (RcSpan span = heightfield.spans[x + z * xSize]; span != null; span = span.next)
+                    for (int span = heightfield.spans[x + z * xSize]; span != RcSpanStore.Nil; span = store[span].next)
                     {
-                        int floor = (span.smax);
-                        int ceiling = span.next != null ? span.next.smin : RC_SPAN_MAX_HEIGHT;
+                        int floor = (store[span].smax);
+                        int ceiling = store[span].next != RcSpanStore.Nil ? store[store[span].next].smin : RC_SPAN_MAX_HEIGHT;
                         if ((ceiling - floor) < walkableHeight)
                         {
-                            span.area = RC_NULL_AREA;
+                            store[span].area = RC_NULL_AREA;
                         }
                     }
                 }

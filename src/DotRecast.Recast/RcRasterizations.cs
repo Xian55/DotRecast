@@ -65,66 +65,68 @@ namespace DotRecast.Recast
         public static bool AddSpan(RcHeightfield heightfield, RcSpanAllocator allocator,
             int x, int z, int min, int max, int areaID, int flagMergeThreshold)
         {
+            RcSpanStore store = heightfield.SpanStore;
+
             // Create the new span, recycling through the pool.
-            RcSpan newSpan = allocator.Alloc();
-            newSpan.smin = min;
-            newSpan.smax = max;
-            newSpan.area = areaID;
-            newSpan.next = null;
+            int newSpan = allocator.Alloc();
+            store[newSpan].smin = min;
+            store[newSpan].smax = max;
+            store[newSpan].area = areaID;
+            store[newSpan].next = RcSpanStore.Nil;
 
             int columnIndex = x + z * heightfield.width;
 
             // Empty cell, add the first span.
-            if (heightfield.spans[columnIndex] == null)
+            if (heightfield.spans[columnIndex] == RcSpanStore.Nil)
             {
                 heightfield.spans[columnIndex] = newSpan;
                 return true;
             }
 
-            RcSpan previousSpan = null;
-            RcSpan currentSpan = heightfield.spans[columnIndex];
+            int previousSpan = RcSpanStore.Nil;
+            int currentSpan = heightfield.spans[columnIndex];
 
             // Insert the new span, possibly merging it with existing spans.
-            while (currentSpan != null)
+            while (currentSpan != RcSpanStore.Nil)
             {
-                if (currentSpan.smin > newSpan.smax)
+                if (store[currentSpan].smin > store[newSpan].smax)
                 {
                     // Current span is further than the new span, break.
                     break;
                 }
 
-                if (currentSpan.smax < newSpan.smin)
+                if (store[currentSpan].smax < store[newSpan].smin)
                 {
                     // Current span is completely before the new span.  Keep going.
                     previousSpan = currentSpan;
-                    currentSpan = currentSpan.next;
+                    currentSpan = store[currentSpan].next;
                 }
                 else
                 {
                     // The new span overlaps with an existing span.  Merge them.
-                    if (currentSpan.smin < newSpan.smin)
+                    if (store[currentSpan].smin < store[newSpan].smin)
                     {
-                        newSpan.smin = currentSpan.smin;
+                        store[newSpan].smin = store[currentSpan].smin;
                     }
 
-                    if (currentSpan.smax > newSpan.smax)
+                    if (store[currentSpan].smax > store[newSpan].smax)
                     {
-                        newSpan.smax = currentSpan.smax;
+                        store[newSpan].smax = store[currentSpan].smax;
                     }
 
                     // Merge flags.
-                    if (MathF.Abs(newSpan.smax - currentSpan.smax) <= flagMergeThreshold)
+                    if (Math.Abs(store[newSpan].smax - store[currentSpan].smax) <= flagMergeThreshold)
                     {
                         // Higher area ID numbers indicate higher resolution priority.
-                        newSpan.area = Math.Max(newSpan.area, currentSpan.area);
+                        store[newSpan].area = Math.Max(store[newSpan].area, store[currentSpan].area);
                     }
 
                     // Remove the current span since it's now merged with newSpan.
                     // Keep going because there might be other overlapping spans that also need to be merged.
-                    RcSpan next = currentSpan.next;
-                    if (previousSpan != null)
+                    int next = store[currentSpan].next;
+                    if (previousSpan != RcSpanStore.Nil)
                     {
-                        previousSpan.next = next;
+                        store[previousSpan].next = next;
                     }
                     else
                     {
@@ -132,7 +134,7 @@ namespace DotRecast.Recast
                     }
 
                     // Return the absorbed span to the pool - `next` is already
-                    // captured, and Free only rewrites currentSpan.next.
+                    // captured, and Free only rewrites its link.
                     allocator.Free(currentSpan);
 
                     currentSpan = next;
@@ -140,15 +142,15 @@ namespace DotRecast.Recast
             }
 
             // Insert new span after prev
-            if (previousSpan != null)
+            if (previousSpan != RcSpanStore.Nil)
             {
-                newSpan.next = previousSpan.next;
-                previousSpan.next = newSpan;
+                store[newSpan].next = store[previousSpan].next;
+                store[previousSpan].next = newSpan;
             }
             else
             {
                 // This span should go before the others in the list
-                newSpan.next = heightfield.spans[columnIndex];
+                store[newSpan].next = heightfield.spans[columnIndex];
                 heightfield.spans[columnIndex] = newSpan;
             }
 
@@ -534,7 +536,7 @@ namespace DotRecast.Recast
                     return;
                 }
 
-                RcSpanAllocator allocator = new RcSpanAllocator();
+                RcSpanAllocator allocator = new RcSpanAllocator(heightfield.SpanStore);
 
                 for (int triIndex = 0; triIndex < numTris; ++triIndex)
                 {
