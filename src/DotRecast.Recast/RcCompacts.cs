@@ -18,6 +18,7 @@ freely, subject to the following restrictions:
 */
 
 using System;
+using System.Linq;
 using DotRecast.Core;
 
 namespace DotRecast.Recast
@@ -114,41 +115,80 @@ namespace DotRecast.Recast
             const int MAX_LAYERS = RC_NOT_CONNECTED - 1;
             int maxLayerIndex = 0;
             int zStride = xSize; // for readability
+            RcCompactCell[] cells = compactHeightfield.cells;
+
+            // The four neighbour cells depend only on the column, not on the
+            // span being connected, so resolve them once per column instead of
+            // once per span - that removes four bounds tests, four dir-table
+            // reads and four cell loads (each with a multiply) per span.
+            Span<int> neighborIndex = stackalloc int[4];
+            Span<int> neighborCount = stackalloc int[4];
+
             for (int z = 0; z < zSize; ++z)
             {
                 for (int x = 0; x < xSize; ++x)
                 {
-                    ref RcCompactCell cell = ref compactHeightfield.cells[x + z * zStride];
-                    for (int i = cell.index, ni = cell.index + cell.count; i < ni; ++i)
+                    ref RcCompactCell cell = ref cells[x + z * zStride];
+                    int cellEnd = cell.index + cell.count;
+                    if (cell.count == 0)
+                    {
+                        continue;
+                    }
+
+                    for (int dir = 0; dir < 4; ++dir)
+                    {
+                        int neighborX = x + GetDirOffsetX(dir);
+                        int neighborZ = z + GetDirOffsetY(dir);
+
+                        // Out of bounds neighbours stay unconnected; a zero count
+                        // skips the scan below and leaves RC_NOT_CONNECTED set.
+                        if (neighborX < 0 || neighborZ < 0 || neighborX >= xSize || neighborZ >= zSize)
+                        {
+                            neighborIndex[dir] = 0;
+                            neighborCount[dir] = 0;
+                            continue;
+                        }
+
+                        ref RcCompactCell neighborCell = ref cells[neighborX + neighborZ * zStride];
+                        neighborIndex[dir] = neighborCell.index;
+                        neighborCount[dir] = neighborCell.count;
+                    }
+
+                    for (int i = cell.index; i < cellEnd; ++i)
                     {
                         ref RcCompactSpanBuilder s = ref tempSpans[i];
+                        int sy = s.y;
+                        int sTop = sy + s.h;
 
                         for (int dir = 0; dir < 4; ++dir)
                         {
                             SetCon(ref s, dir, RC_NOT_CONNECTED);
-                            int neighborX = x + GetDirOffsetX(dir);
-                            int neighborZ = z + GetDirOffsetY(dir);
-                            // First check that the neighbour cell is in bounds.
-                            if (neighborX < 0 || neighborZ < 0 || neighborX >= xSize || neighborZ >= zSize)
-                            {
-                                continue;
-                            }
 
                             // Iterate over all neighbour spans and check if any of the is
                             // accessible from current cell.
-                            ref RcCompactCell neighborCell = ref compactHeightfield.cells[neighborX + neighborZ * xSize];
-                            for (int k = neighborCell.index, nk = neighborCell.index + neighborCell.count; k < nk; ++k)
+                            int baseIndex = neighborIndex[dir];
+                            for (int k = baseIndex, nk = baseIndex + neighborCount[dir]; k < nk; ++k)
                             {
                                 ref RcCompactSpanBuilder neighborSpan = ref tempSpans[k];
-                                int bot = Math.Max(s.y, neighborSpan.y);
-                                int top = Math.Min(s.y + s.h, neighborSpan.y + neighborSpan.h);
+                                int ny = neighborSpan.y;
+
+                                // Spans within a cell are stored bottom-up, so once
+                                // the neighbour climbs past the climb limit no later
+                                // span in this column can pass either.
+                                if (ny - sy > walkableClimb)
+                                {
+                                    break;
+                                }
+
+                                int bot = Math.Max(sy, ny);
+                                int top = Math.Min(sTop, ny + neighborSpan.h);
 
                                 // Check that the gap between the spans is walkable,
                                 // and that the climb height between the gaps is not too high.
-                                if ((top - bot) >= walkableHeight && MathF.Abs(neighborSpan.y - s.y) <= walkableClimb)
+                                if ((top - bot) >= walkableHeight && Math.Abs(ny - sy) <= walkableClimb)
                                 {
                                     // Mark direction as walkable.
-                                    int layerIndex = k - neighborCell.index;
+                                    int layerIndex = k - baseIndex;
                                     if (layerIndex < 0 || layerIndex > MAX_LAYERS)
                                     {
                                         maxLayerIndex = Math.Max(maxLayerIndex, layerIndex);
