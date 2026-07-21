@@ -270,6 +270,12 @@ namespace DotRecast.Recast
 
             int[] areas = new int[compactHeightfield.spanCount];
 
+            // Hoisted: these are class fields reloaded on every innermost access.
+            // compactHeightfield.areas is only replaced after the whole loop.
+            int[] srcAreas = compactHeightfield.areas;
+            RcCompactCell[] cells = compactHeightfield.cells;
+            RcCompactSpan[] spans = compactHeightfield.spans;
+
             // One scratch window reused for every span; this used to be a
             // `new int[9]` per span, i.e. one allocation per compact span.
             Span<int> neighborAreas = stackalloc int[9];
@@ -278,50 +284,67 @@ namespace DotRecast.Recast
             {
                 for (int x = 0; x < xSize; ++x)
                 {
-                    ref RcCompactCell cell = ref compactHeightfield.cells[x + z * zStride];
+                    ref RcCompactCell cell = ref cells[x + z * zStride];
                     int maxSpanIndex = cell.index + cell.count;
                     for (int spanIndex = cell.index; spanIndex < maxSpanIndex; ++spanIndex)
                     {
-                        ref RcCompactSpan span = ref compactHeightfield.spans[spanIndex];
-                        if (compactHeightfield.areas[spanIndex] == RC_NULL_AREA)
+                        ref RcCompactSpan span = ref spans[spanIndex];
+                        int centerArea = srcAreas[spanIndex];
+                        if (centerArea == RC_NULL_AREA)
                         {
-                            areas[spanIndex] = compactHeightfield.areas[spanIndex];
+                            areas[spanIndex] = centerArea;
                             continue;
                         }
 
-                        neighborAreas.Fill(compactHeightfield.areas[spanIndex]);
+                        neighborAreas.Fill(centerArea);
+
+                        // Every slot starts at the centre area, so unless some
+                        // neighbour actually differs the window is nine equal
+                        // values and the median is the centre. On open terrain
+                        // that is nearly every span, and it skips the sort.
+                        bool differs = false;
 
                         for (int dir = 0; dir < 4; ++dir)
                         {
-                            if (GetCon(span, dir) == RC_NOT_CONNECTED)
+                            int connection = GetCon(span, dir);
+                            if (connection == RC_NOT_CONNECTED)
                             {
                                 continue;
                             }
 
                             int aX = x + GetDirOffsetX(dir);
                             int aZ = z + GetDirOffsetY(dir);
-                            int aIndex = compactHeightfield.cells[aX + aZ * zStride].index + GetCon(span, dir);
-                            if (compactHeightfield.areas[aIndex] != RC_NULL_AREA)
+                            int aIndex = cells[aX + aZ * zStride].index + connection;
+                            int aArea = srcAreas[aIndex];
+                            if (aArea != RC_NULL_AREA)
                             {
-                                neighborAreas[dir * 2 + 0] = compactHeightfield.areas[aIndex];
+                                neighborAreas[dir * 2 + 0] = aArea;
+                                differs |= aArea != centerArea;
                             }
 
-                            ref RcCompactSpan aSpan = ref compactHeightfield.spans[aIndex];
+                            ref RcCompactSpan aSpan = ref spans[aIndex];
                             int dir2 = (dir + 1) & 0x3;
                             int neighborConnection2 = GetCon(aSpan, dir2);
                             if (neighborConnection2 != RC_NOT_CONNECTED)
                             {
                                 int bX = aX + GetDirOffsetX(dir2);
                                 int bZ = aZ + GetDirOffsetY(dir2);
-                                int bIndex = compactHeightfield.cells[bX + bZ * zStride].index + GetCon(aSpan, dir2);
-                                if (compactHeightfield.areas[bIndex] != RC_NULL_AREA)
+                                int bIndex = cells[bX + bZ * zStride].index + neighborConnection2;
+                                int bArea = srcAreas[bIndex];
+                                if (bArea != RC_NULL_AREA)
                                 {
-                                    neighborAreas[dir * 2 + 1] = compactHeightfield.areas[bIndex];
+                                    neighborAreas[dir * 2 + 1] = bArea;
+                                    differs |= bArea != centerArea;
                                 }
                             }
                         }
 
-                        //Array.Sort(neighborAreas);
+                        if (!differs)
+                        {
+                            areas[spanIndex] = centerArea;
+                            continue;
+                        }
+
                         neighborAreas.InsertSort();
                         areas[spanIndex] = neighborAreas[4];
                     }
