@@ -1,4 +1,4 @@
-/*
+﻿/*
 Copyright (c) 2009-2010 Mikko Mononen memon@inside.org
 recast4j copyright (c) 2015-2019 Piotr Piastucki piotr@jtilia.org
 DotRecast Copyright (c) 2023-2024 Choi Ikpil ikpil@naver.com
@@ -38,13 +38,9 @@ namespace DotRecast.Recast
             int w = chf.width;
             int h = chf.height;
 
-            // Init distance and points.
-            for (int i = 0; i < chf.spanCount; ++i)
-            {
-                src[i] = 0xffff;
-            }
-
-            // Mark boundary cells.
+            // Mark boundary cells. The cells partition every span index exactly
+            // once, so seeding src here folds away a separate init sweep of the
+            // whole array.
             for (int y = 0; y < h; ++y)
             {
                 for (int x = 0; x < w; ++x)
@@ -70,10 +66,7 @@ namespace DotRecast.Recast
                             }
                         }
 
-                        if (nc != 4)
-                        {
-                            src[i] = 0;
-                        }
+                        src[i] = nc != 4 ? 0 : 0xffff;
                     }
                 }
             }
@@ -141,7 +134,10 @@ namespace DotRecast.Recast
                 }
             }
 
-            // Pass 2
+            // Pass 2. Each iteration writes only src[i], so the value is final
+            // by the end of the iteration and the maximum folds in here instead
+            // of costing a separate read pass over the whole array.
+            maxDist = 0;
             for (int y = h - 1; y >= 0; --y)
             {
                 for (int x = w - 1; x >= 0; --x)
@@ -200,14 +196,10 @@ namespace DotRecast.Recast
                                 }
                             }
                         }
+
+                        maxDist = Math.Max(src[i], maxDist);
                     }
                 }
-            }
-
-            maxDist = 0;
-            for (int i = 0; i < chf.spanCount; ++i)
-            {
-                maxDist = Math.Max(src[i], maxDist);
             }
 
             return maxDist;
