@@ -528,13 +528,17 @@ namespace DotRecast.Recast
         /// ever writes a non-zero one, and FloodRegion's reset clears only spans
         /// that same call had just claimed.
         /// </summary>
-        private sealed class RcWatershedLevelIndex
+        private sealed class RcWatershedLevelIndex : IDisposable
         {
-            private readonly List<RcLevelStackEntry>[] windows;
+            /// Window bucket boundaries: window m occupies
+            /// entries[windowStart[m] .. windowStart[m + 1]).
+            private readonly int[] windowStart;
+            private RcLevelStackEntry[] entries;
+            private readonly int windowCount;
             private readonly int anchorLevel;
             private readonly int[] dist;
 
-            private List<RcLevelStackEntry> carry = new List<RcLevelStackEntry>(256);
+            private List<RcLevelStackEntry> carry;
             private List<RcLevelStackEntry> carryNext = new List<RcLevelStackEntry>(256);
             private readonly List<RcLevelStackEntry> topLevel = new List<RcLevelStackEntry>(256);
             private readonly List<RcLevelStackEntry> lowerLevels = new List<RcLevelStackEntry>(256);
@@ -544,15 +548,21 @@ namespace DotRecast.Recast
                 this.anchorLevel = anchorLevel;
                 this.dist = chf.dist;
 
-                windows = new List<RcLevelStackEntry>[Math.Max(1, (anchorLevel / nbStacks) + 2)];
-                for (int i = 0; i < windows.Length; ++i)
-                {
-                    windows[i] = new List<RcLevelStackEntry>();
-                }
+                windowCount = Math.Max(1, (anchorLevel / nbStacks) + 2);
+
+                // Counting sort rather than a List per window. Every unassigned
+                // walkable span produces one entry - 2e5 to 6e5 per tile - and
+                // growing that many 12 byte structs through doubling Lists was
+                // the single largest allocator in the region build. Two scans
+                // and one exactly-sized pooled array instead.
+                windowStart = ArrayPool<int>.Shared.Rent(windowCount + 2);
+                Array.Clear(windowStart, 0, windowCount + 2);
 
                 int w = chf.width;
                 int h = chf.height;
 
+                // Pass 1: bucket occupancy. Bucket windowCount is the carry.
+                int carryCount = 0;
                 for (int y = 0; y < h; ++y)
                 {
                     for (int x = 0; x < w; ++x)
@@ -572,17 +582,73 @@ namespace DotRecast.Recast
                             // in the carry.
                             if (level > anchorLevel)
                             {
+                                carryCount++;
+                                continue;
+                            }
+
+                            int m = (anchorLevel - level) / nbStacks;
+                            if (m < windowCount)
+                            {
+                                windowStart[m + 1]++;
+                            }
+                        }
+                    }
+                }
+
+                for (int m = 0; m < windowCount; ++m)
+                {
+                    windowStart[m + 1] += windowStart[m];
+                }
+
+                int total = windowStart[windowCount];
+                entries = total > 0 ? ArrayPool<RcLevelStackEntry>.Shared.Rent(total) : Array.Empty<RcLevelStackEntry>();
+                carry = new List<RcLevelStackEntry>(Math.Max(256, carryCount));
+
+                // Pass 2: place. Walked in the same order, so each window stays
+                // sorted by span index - which the merges in Fill depend on.
+                Span<int> cursor = windowCount <= 128 ? stackalloc int[windowCount] : new int[windowCount];
+                for (int m = 0; m < windowCount; ++m)
+                {
+                    cursor[m] = windowStart[m];
+                }
+
+                for (int y = 0; y < h; ++y)
+                {
+                    for (int x = 0; x < w; ++x)
+                    {
+                        ref RcCompactCell c = ref chf.cells[x + y * w];
+                        for (int i = c.index, ni = c.index + c.count; i < ni; ++i)
+                        {
+                            if (chf.areas[i] == RC_NULL_AREA || srcReg[i] != 0)
+                            {
+                                continue;
+                            }
+
+                            int level = dist[i] >> 1;
+
+                            if (level > anchorLevel)
+                            {
                                 carry.Add(new RcLevelStackEntry(x, y, i));
                                 continue;
                             }
 
                             int m = (anchorLevel - level) / nbStacks;
-                            if (m < windows.Length)
+                            if (m < windowCount)
                             {
-                                windows[m].Add(new RcLevelStackEntry(x, y, i));
+                                entries[cursor[m]++] = new RcLevelStackEntry(x, y, i);
                             }
                         }
                     }
+                }
+            }
+
+            public void Dispose()
+            {
+                ArrayPool<int>.Shared.Return(windowStart);
+                if (entries.Length != 0)
+                {
+                    ArrayPool<RcLevelStackEntry>.Shared.Return(entries);
+                    entries = Array.Empty<RcLevelStackEntry>();
                 }
             }
 
@@ -603,10 +669,11 @@ namespace DotRecast.Recast
                 lowerLevels.Clear();
 
                 int m = (anchorLevel - startLevel) / nbStacks;
-                if (m >= 0 && m < windows.Length)
+                if (m >= 0 && m < windowCount)
                 {
-                    List<RcLevelStackEntry> window = windows[m];
-                    for (int k = 0; k < window.Count; ++k)
+                    ReadOnlySpan<RcLevelStackEntry> window =
+                        entries.AsSpan(windowStart[m], windowStart[m + 1] - windowStart[m]);
+                    for (int k = 0; k < window.Length; ++k)
                     {
                         RcLevelStackEntry e = window[k];
                         if (srcReg[e.index] != 0)
@@ -1891,7 +1958,7 @@ namespace DotRecast.Recast
             // the precomputed windows line up with it exactly - level drops by
             // 2 per iteration and 8 iterations per wrap, so startLevel drops by
             // exactly 8 between refills.
-            RcWatershedLevelIndex levelIndex =
+            using RcWatershedLevelIndex levelIndex =
                 new RcWatershedLevelIndex(chf, srcReg, (level >= 2 ? level - 2 : 0) >> 1, NB_STACKS);
 
             int sId = -1;
