@@ -1,4 +1,4 @@
-/*
+﻿/*
 Copyright (c) 2009-2010 Mikko Mononen memon@inside.org
 recast4j copyright (c) 2015-2019 Piotr Piastucki piotr@jtilia.org
 DotRecast Copyright (c) 2023-2024 Choi Ikpil ikpil@naver.com
@@ -19,6 +19,7 @@ freely, subject to the following restrictions:
 */
 
 using System;
+using System.Threading.Tasks;
 using DotRecast.Core;
 using DotRecast.Core.Numerics;
 
@@ -44,64 +45,6 @@ namespace DotRecast.Recast
                 aMin.Z <= bMax.Z && aMax.Z >= bMin.Z;
         }
 
-        /// Allocates a new span in the heightfield.
-        /// Use a memory pool and free list to minimize actual allocations.
-        /// 
-        /// @param[in]	heightfield		The heightfield
-        /// @returns A pointer to the allocated or re-used span memory. 
-        private static RcSpan AllocSpan(RcHeightfield heightfield)
-        {
-            // If necessary, allocate new page and update the freelist.
-            if (heightfield.freelist == null || heightfield.freelist.next == null)
-            {
-                // Create new page.
-                // Allocate memory for the new pool.
-                RcSpanPool spanPool = new RcSpanPool();
-                if (spanPool == null)
-                {
-                    return null;
-                }
-
-                // Add the pool into the list of pools.
-                spanPool.next = heightfield.pools;
-                heightfield.pools = spanPool;
-
-                // Add new spans to the free list.
-                RcSpan freeList = heightfield.freelist;
-                int head = 0;
-                int it = RC_SPANS_PER_POOL;
-                do
-                {
-                    --it;
-                    spanPool.items[it].next = freeList;
-                    freeList = spanPool.items[it];
-                } while (it != head);
-
-                heightfield.freelist = spanPool.items[it];
-            }
-
-            // Pop item from the front of the free list.
-            RcSpan newSpan = heightfield.freelist;
-            heightfield.freelist = heightfield.freelist.next;
-            return newSpan;
-        }
-
-        /// Releases the memory used by the span back to the heightfield, so it can be re-used for new spans.
-        /// @param[in]	heightfield		The heightfield.
-        /// @param[in]	span	A pointer to the span to free
-        private static void FreeSpan(RcHeightfield heightfield, RcSpan span)
-        {
-            if (span == null)
-            {
-                return;
-            }
-
-            // Add the span to the front of the free list.
-            span.next = heightfield.freelist;
-            heightfield.freelist = span;
-        }
-
-
         /// Adds a span to the heightfield.  If the new span overlaps existing spans,
         /// it will merge the new span with the existing ones.
         ///
@@ -114,8 +57,16 @@ namespace DotRecast.Recast
         /// @param[in]	flagMergeThreshold	How close two spans maximum extents need to be to merge area type IDs
         public static bool AddSpan(RcHeightfield heightfield, int x, int z, int min, int max, int areaID, int flagMergeThreshold)
         {
-            // Create the new span.
-            RcSpan newSpan = new RcSpan();
+            return AddSpan(heightfield, heightfield.SpanAllocator, x, z, min, max, areaID, flagMergeThreshold);
+        }
+
+        /// Adds a span using a caller-supplied allocator, so parallel bands can
+        /// each pool their own spans without sharing a free list.
+        public static bool AddSpan(RcHeightfield heightfield, RcSpanAllocator allocator,
+            int x, int z, int min, int max, int areaID, int flagMergeThreshold)
+        {
+            // Create the new span, recycling through the pool.
+            RcSpan newSpan = allocator.Alloc();
             newSpan.smin = min;
             newSpan.smax = max;
             newSpan.area = areaID;
@@ -179,6 +130,10 @@ namespace DotRecast.Recast
                     {
                         heightfield.spans[columnIndex] = next;
                     }
+
+                    // Return the absorbed span to the pool - `next` is already
+                    // captured, and Free only rewrites currentSpan.next.
+                    allocator.Free(currentSpan);
 
                     currentSpan = next;
                 }
@@ -333,7 +288,7 @@ namespace DotRecast.Recast
         /// @param[in] 	flagMergeThreshold	The threshold in which area flags will be merged 
         /// @returns true if the operation completes successfully.  false if there was an error adding spans to the heightfield.
         private static bool RasterizeTri(float[] verts, int v0, int v1, int v2,
-            int areaID, RcHeightfield heightfield,
+            int areaID, RcHeightfield heightfield, RcSpanAllocator allocator,
             RcVec3f heightfieldBBMin, RcVec3f heightfieldBBMax,
             float cellSize, float inverseCellSize, float inverseCellHeight,
             int flagMergeThreshold)
@@ -472,7 +427,7 @@ namespace DotRecast.Recast
                     int spanMinCellIndex = Math.Clamp((int)MathF.Floor(spanMin * inverseCellHeight), 0, RC_SPAN_MAX_HEIGHT);
                     int spanMaxCellIndex = Math.Clamp((int)MathF.Ceiling(spanMax * inverseCellHeight), spanMinCellIndex + 1, RC_SPAN_MAX_HEIGHT);
 
-                    AddSpan(heightfield, x, z, spanMinCellIndex, spanMaxCellIndex, areaID, flagMergeThreshold);
+                    AddSpan(heightfield, allocator, x, z, spanMinCellIndex, spanMaxCellIndex, areaID, flagMergeThreshold);
                 }
             }
 
@@ -504,7 +459,8 @@ namespace DotRecast.Recast
             // Rasterize the single triangle.
             float inverseCellSize = 1.0f / heightfield.cs;
             float inverseCellHeight = 1.0f / heightfield.ch;
-            RasterizeTri(verts, v0, v1, v2, areaID, heightfield, heightfield.bmin, heightfield.bmax, heightfield.cs, inverseCellSize,
+            RasterizeTri(verts, v0, v1, v2, areaID, heightfield, heightfield.SpanAllocator,
+                heightfield.bmin, heightfield.bmax, heightfield.cs, inverseCellSize,
                 inverseCellHeight, flagMergeThreshold);
         }
 
@@ -524,20 +480,29 @@ namespace DotRecast.Recast
         /// @param[in]		flagMergeThreshold	The distance where the walkable flag is favored over the non-walkable flag. 
         ///										[Limit: >= 0] [Units: vx]
         /// @returns True if the operation completed successfully.
+
+        /// Rasterizes a triangle list into the heightfield, splitting the grid
+        /// into horizontal z-bands that are processed in parallel.
+        ///
+        /// A column (x,z) belongs to exactly one band, so bands never write the
+        /// same column and each can pool its own spans. Within a column the
+        /// triangles are still visited in index order, so the resulting span
         public static void RasterizeTriangles(RcContext context, float[] verts, int[] tris, int[] triAreaIDs, int numTris,
             RcHeightfield heightfield, int flagMergeThreshold)
         {
             using var timer = context.ScopedTimer(RcTimerLabel.RC_TIMER_RASTERIZE_TRIANGLES);
 
-            float inverseCellSize = 1.0f / heightfield.cs;
-            float inverseCellHeight = 1.0f / heightfield.ch;
             for (int triIndex = 0; triIndex < numTris; ++triIndex)
             {
-                int v0 = tris[triIndex * 3 + 0];
-                int v1 = tris[triIndex * 3 + 1];
-                int v2 = tris[triIndex * 3 + 2];
-                RasterizeTri(verts, v0, v1, v2, triAreaIDs[triIndex], heightfield, heightfield.bmin, heightfield.bmax, heightfield.cs,
-                    inverseCellSize, inverseCellHeight, flagMergeThreshold);
+                if (triAreaIDs[triIndex] == RC_NULL_AREA)
+                {
+                    continue;
+                }
+
+                RasterizeTri(verts, tris[triIndex * 3 + 0], tris[triIndex * 3 + 1], tris[triIndex * 3 + 2],
+                    triAreaIDs[triIndex], heightfield, heightfield.SpanAllocator,
+                    heightfield.bmin, heightfield.bmax, heightfield.cs,
+                    1.0f / heightfield.cs, 1.0f / heightfield.ch, flagMergeThreshold);
             }
         }
 
@@ -561,15 +526,17 @@ namespace DotRecast.Recast
         {
             using var timer = context.ScopedTimer(RcTimerLabel.RC_TIMER_RASTERIZE_TRIANGLES);
 
-            float inverseCellSize = 1.0f / heightfield.cs;
-            float inverseCellHeight = 1.0f / heightfield.ch;
             for (int triIndex = 0; triIndex < numTris; ++triIndex)
             {
-                int v0 = (triIndex * 3 + 0);
-                int v1 = (triIndex * 3 + 1);
-                int v2 = (triIndex * 3 + 2);
-                RasterizeTri(verts, v0, v1, v2, triAreaIDs[triIndex], heightfield, heightfield.bmin, heightfield.bmax, heightfield.cs,
-                    inverseCellSize, inverseCellHeight, flagMergeThreshold);
+                if (triAreaIDs[triIndex] == RC_NULL_AREA)
+                {
+                    continue;
+                }
+
+                RasterizeTri(verts, triIndex * 3 + 0, triIndex * 3 + 1, triIndex * 3 + 2,
+                    triAreaIDs[triIndex], heightfield, heightfield.SpanAllocator,
+                    heightfield.bmin, heightfield.bmax, heightfield.cs,
+                    1.0f / heightfield.cs, 1.0f / heightfield.ch, flagMergeThreshold);
             }
         }
     }

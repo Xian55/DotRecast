@@ -35,8 +35,12 @@ namespace DotRecast.Recast
         public readonly RcSpan[] spans; //< Heightfield of spans (width*height).
 
         // memory pool for rcSpan instances.
-        public RcSpanPool pools; //< Linked list of span pools.
-        public RcSpan freelist; //< The next free span.
+        public RcSpanPool pools; //< Linked list of span pools. (legacy, unused)
+        public RcSpan freelist; //< The next free span. (legacy, unused)
+
+        /// Default pooled span source for single-threaded rasterization.
+        /// Parallel rasterization gives each band its own allocator instead.
+        public readonly RcSpanAllocator SpanAllocator = new RcSpanAllocator();
 
         /** Border size in cell units */
         public readonly int borderSize;
