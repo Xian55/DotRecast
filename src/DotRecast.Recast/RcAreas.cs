@@ -1,4 +1,4 @@
-/*
+﻿/*
 Copyright (c) 2009-2010 Mikko Mononen memon@inside.org
 recast4j copyright (c) 2015-2019 Piotr Piastucki piotr@jtilia.org
 DotRecast Copyright (c) 2023-2024 Choi Ikpil ikpil@naver.com
@@ -270,6 +270,10 @@ namespace DotRecast.Recast
 
             int[] areas = new int[compactHeightfield.spanCount];
 
+            // One scratch window reused for every span; this used to be a
+            // `new int[9]` per span, i.e. one allocation per compact span.
+            Span<int> neighborAreas = stackalloc int[9];
+
             for (int z = 0; z < zSize; ++z)
             {
                 for (int x = 0; x < xSize; ++x)
@@ -285,11 +289,7 @@ namespace DotRecast.Recast
                             continue;
                         }
 
-                        int[] neighborAreas = new int[9];
-                        for (int neighborIndex = 0; neighborIndex < 9; ++neighborIndex)
-                        {
-                            neighborAreas[neighborIndex] = compactHeightfield.areas[spanIndex];
-                        }
+                        neighborAreas.Fill(compactHeightfield.areas[spanIndex]);
 
                         for (int dir = 0; dir < 4; ++dir)
                         {
