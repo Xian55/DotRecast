@@ -1,4 +1,4 @@
-﻿/*
+/*
 Copyright (c) 2009-2010 Mikko Mononen memon@inside.org
 recast4j copyright (c) 2015-2019 Piotr Piastucki piotr@jtilia.org
 DotRecast Copyright (c) 2023-2024 Choi Ikpil ikpil@naver.com
@@ -291,7 +291,7 @@ namespace DotRecast.Recast
             int areaID, RcHeightfield heightfield, RcSpanAllocator allocator,
             RcVec3f heightfieldBBMin, RcVec3f heightfieldBBMax,
             float cellSize, float inverseCellSize, float inverseCellHeight,
-            int flagMergeThreshold)
+            int flagMergeThreshold, int bandZMin, int bandZMax)
         {
             // Calculate the bounding box of the triangle.
             RcVec3f triBBMin = verts.ToVec3(v0 * 3);
@@ -345,7 +345,7 @@ namespace DotRecast.Recast
                     continue;
                 }
 
-                if (z < 0)
+                if (z < 0 || z < bandZMin || z > bandZMax)
                 {
                     continue;
                 }
@@ -461,7 +461,7 @@ namespace DotRecast.Recast
             float inverseCellHeight = 1.0f / heightfield.ch;
             RasterizeTri(verts, v0, v1, v2, areaID, heightfield, heightfield.SpanAllocator,
                 heightfield.bmin, heightfield.bmax, heightfield.cs, inverseCellSize,
-                inverseCellHeight, flagMergeThreshold);
+                inverseCellHeight, flagMergeThreshold, 0, heightfield.height - 1);
         }
 
         /// Rasterizes an indexed triangle mesh into the specified heightfield.
@@ -487,23 +487,72 @@ namespace DotRecast.Recast
         /// A column (x,z) belongs to exactly one band, so bands never write the
         /// same column and each can pool its own spans. Within a column the
         /// triangles are still visited in index order, so the resulting span
+        /// lists - and therefore the built mesh - are identical to the
+        /// single-threaded path.
+        private static void RasterizeBanded(float[] verts, Func<int, int> vertIndex, int[] triAreaIDs, int numTris,
+            RcHeightfield heightfield, int flagMergeThreshold, Func<int, int, int> triVert)
+        {
+            float inverseCellSize = 1.0f / heightfield.cs;
+            float inverseCellHeight = 1.0f / heightfield.ch;
+
+            // Small workloads are not worth the coordination; fall back to one band.
+            const int MinRowsPerBand = 32;
+            const int MinTrisForParallel = 2048;
+
+            int bandCount = Environment.ProcessorCount;
+            if (numTris < MinTrisForParallel || heightfield.height < MinRowsPerBand * 2)
+            {
+                bandCount = 1;
+            }
+            else
+            {
+                bandCount = Math.Clamp(bandCount, 1, Math.Max(1, heightfield.height / MinRowsPerBand));
+            }
+
+            if (bandCount <= 1)
+            {
+                RcSpanAllocator allocator = heightfield.SpanAllocator;
+                for (int triIndex = 0; triIndex < numTris; ++triIndex)
+                {
+                    RasterizeTri(verts, triVert(triIndex, 0), triVert(triIndex, 1), triVert(triIndex, 2),
+                        triAreaIDs[triIndex], heightfield, allocator, heightfield.bmin, heightfield.bmax,
+                        heightfield.cs, inverseCellSize, inverseCellHeight, flagMergeThreshold,
+                        0, heightfield.height - 1);
+                }
+
+                return;
+            }
+
+            int rowsPerBand = (heightfield.height + bandCount - 1) / bandCount;
+
+            Parallel.For(0, bandCount, band =>
+            {
+                int bandZMin = band * rowsPerBand;
+                int bandZMax = Math.Min(heightfield.height, bandZMin + rowsPerBand) - 1;
+                if (bandZMin > bandZMax)
+                {
+                    return;
+                }
+
+                RcSpanAllocator allocator = new RcSpanAllocator();
+
+                for (int triIndex = 0; triIndex < numTris; ++triIndex)
+                {
+                    RasterizeTri(verts, triVert(triIndex, 0), triVert(triIndex, 1), triVert(triIndex, 2),
+                        triAreaIDs[triIndex], heightfield, allocator, heightfield.bmin, heightfield.bmax,
+                        heightfield.cs, inverseCellSize, inverseCellHeight, flagMergeThreshold,
+                        bandZMin, bandZMax);
+                }
+            });
+        }
+
         public static void RasterizeTriangles(RcContext context, float[] verts, int[] tris, int[] triAreaIDs, int numTris,
             RcHeightfield heightfield, int flagMergeThreshold)
         {
             using var timer = context.ScopedTimer(RcTimerLabel.RC_TIMER_RASTERIZE_TRIANGLES);
 
-            for (int triIndex = 0; triIndex < numTris; ++triIndex)
-            {
-                if (triAreaIDs[triIndex] == RC_NULL_AREA)
-                {
-                    continue;
-                }
-
-                RasterizeTri(verts, tris[triIndex * 3 + 0], tris[triIndex * 3 + 1], tris[triIndex * 3 + 2],
-                    triAreaIDs[triIndex], heightfield, heightfield.SpanAllocator,
-                    heightfield.bmin, heightfield.bmax, heightfield.cs,
-                    1.0f / heightfield.cs, 1.0f / heightfield.ch, flagMergeThreshold);
-            }
+            RasterizeBanded(verts, null, triAreaIDs, numTris, heightfield, flagMergeThreshold,
+                (triIndex, corner) => tris[triIndex * 3 + corner]);
         }
 
         /// Rasterizes a triangle list into the specified heightfield.
@@ -526,18 +575,8 @@ namespace DotRecast.Recast
         {
             using var timer = context.ScopedTimer(RcTimerLabel.RC_TIMER_RASTERIZE_TRIANGLES);
 
-            for (int triIndex = 0; triIndex < numTris; ++triIndex)
-            {
-                if (triAreaIDs[triIndex] == RC_NULL_AREA)
-                {
-                    continue;
-                }
-
-                RasterizeTri(verts, triIndex * 3 + 0, triIndex * 3 + 1, triIndex * 3 + 2,
-                    triAreaIDs[triIndex], heightfield, heightfield.SpanAllocator,
-                    heightfield.bmin, heightfield.bmax, heightfield.cs,
-                    1.0f / heightfield.cs, 1.0f / heightfield.ch, flagMergeThreshold);
-            }
+            RasterizeBanded(verts, null, triAreaIDs, numTris, heightfield, flagMergeThreshold,
+                (triIndex, corner) => triIndex * 3 + corner);
         }
     }
 }
