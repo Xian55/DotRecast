@@ -1,4 +1,4 @@
-﻿/*
+/*
 Copyright (c) 2009-2010 Mikko Mononen memon@inside.org
 recast4j copyright (c) 2015-2019 Piotr Piastucki piotr@jtilia.org
 DotRecast Copyright (c) 2023-2024 Choi Ikpil ikpil@naver.com
@@ -19,6 +19,7 @@ freely, subject to the following restrictions:
 */
 
 using System;
+using System.Buffers;
 using DotRecast.Core;
 using DotRecast.Core.Collections.Extensions;
 using DotRecast.Core.Numerics;
@@ -51,7 +52,12 @@ namespace DotRecast.Recast
 
             using var timer = context.ScopedTimer(RcTimerLabel.RC_TIMER_ERODE_AREA);
 
-            int[] distanceToBoundary = new int[compactHeightfield.spanCount];
+            // Pooled: dies with this method, and the boundary pass below writes
+            // every span index, so a dirty rented array is fine.
+            int[] distanceToBoundary = ArrayPool<int>.Shared.Rent(compactHeightfield.spanCount);
+
+            try
+            {
 
             // Mark boundary cells. The cells partition every span index exactly
             // once, so seeding the array here folds away the separate Array.Fill
@@ -244,6 +250,11 @@ namespace DotRecast.Recast
                         }
                     }
                 }
+            }
+            }
+            finally
+            {
+                ArrayPool<int>.Shared.Return(distanceToBoundary);
             }
         }
 

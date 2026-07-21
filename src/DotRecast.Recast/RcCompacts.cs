@@ -1,4 +1,4 @@
-﻿/*
+/*
 recast4j copyright (c) 2021 Piotr Piastucki piotr@jtilia.org
 DotRecast Copyright (c) 2023-2024 Choi Ikpil ikpil@naver.com
 
@@ -18,6 +18,7 @@ freely, subject to the following restrictions:
 */
 
 using System;
+using System.Buffers;
 using System.Linq;
 using DotRecast.Core;
 
@@ -79,7 +80,14 @@ namespace DotRecast.Recast
             compactHeightfield.areas = new int[spanCount];
 
             // Value type, so the array itself is the storage - no per-span object.
-            RcCompactSpanBuilder[] tempSpans = new RcCompactSpanBuilder[spanCount];
+            // Pooled: at ~300k spans this is a ~5MB large-object allocation per
+            // tile that dies at the end of this method, and several tiles bake
+            // concurrently. Every field is written explicitly below, so the
+            // array does not need clearing.
+            RcCompactSpanBuilder[] tempSpans = ArrayPool<RcCompactSpanBuilder>.Shared.Rent(spanCount);
+
+            try
+            {
 
             // Fill in cells and spans.
             int currentCellIndex = 0;
@@ -100,8 +108,17 @@ namespace DotRecast.Recast
                     {
                         int bot = span.smax;
                         int top = span.next != null ? (int)span.next.smin : MAX_HEIGHT;
-                        tempSpans[currentCellIndex].y = Math.Clamp(bot, 0, MAX_HEIGHT);
-                        tempSpans[currentCellIndex].h = Math.Clamp(top - bot, 0, MAX_HEIGHT);
+                        ref RcCompactSpanBuilder builder = ref tempSpans[currentCellIndex];
+                        builder.y = Math.Clamp(bot, 0, MAX_HEIGHT);
+                        builder.h = Math.Clamp(top - bot, 0, MAX_HEIGHT);
+
+                        // Written explicitly rather than relying on zero-init:
+                        // the backing array is pooled, so it arrives dirty.
+                        // SetCon below read-modify-writes con, and Build copies
+                        // reg verbatim, so both must start clean.
+                        builder.reg = 0;
+                        builder.con = 0;
+
                         compactHeightfield.areas[currentCellIndex] = span.area;
                         currentCellIndex++;
                         tmpCount++;
@@ -218,6 +235,11 @@ namespace DotRecast.Recast
             compactHeightfield.spans = builtSpans;
 
             return compactHeightfield;
+            }
+            finally
+            {
+                ArrayPool<RcCompactSpanBuilder>.Shared.Return(tempSpans);
+            }
         }
 
         /// Returns the number of spans contained in the specified heightfield.

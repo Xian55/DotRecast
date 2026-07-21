@@ -1,4 +1,4 @@
-﻿/*
+/*
 Copyright (c) 2009-2010 Mikko Mononen memon@inside.org
 recast4j copyright (c) 2015-2019 Piotr Piastucki piotr@jtilia.org
 DotRecast Copyright (c) 2023-2024 Choi Ikpil ikpil@naver.com
@@ -19,6 +19,7 @@ freely, subject to the following restrictions:
 */
 
 using System;
+using System.Buffers;
 using System.Collections.Generic;
 using System.Linq;
 using DotRecast.Core;
@@ -1847,8 +1848,17 @@ namespace DotRecast.Recast
             // Reused by every ExpandRegions call across all watershed levels.
             List<RcDirtyEntry> dirtyEntries = new List<RcDirtyEntry>(256);
 
-            int[] srcReg = new int[chf.spanCount];
-            int[] srcDist = new int[chf.spanCount];
+            // Pooled: both die with this method. Unlike the other pooled
+            // scratch these must start zeroed - srcReg == 0 is the "no region
+            // yet" marker the whole watershed keys off - so clear the used
+            // prefix after renting.
+            int[] srcReg = ArrayPool<int>.Shared.Rent(chf.spanCount);
+            int[] srcDist = ArrayPool<int>.Shared.Rent(chf.spanCount);
+            Array.Clear(srcReg, 0, chf.spanCount);
+            Array.Clear(srcDist, 0, chf.spanCount);
+
+            try
+            {
 
             int regionId = 1;
             int level = (chf.maxDistance + 1) & ~1;
@@ -1963,6 +1973,12 @@ namespace DotRecast.Recast
                     .NewBuilder(ref chf.spans[i])
                     .WithReg(srcReg[i])
                     .Build();
+            }
+            }
+            finally
+            {
+                ArrayPool<int>.Shared.Return(srcReg);
+                ArrayPool<int>.Shared.Return(srcDist);
             }
         }
 
