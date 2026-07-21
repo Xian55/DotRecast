@@ -1703,7 +1703,7 @@ namespace DotRecast.Recast
                 level = level >= 2 ? level - 2 : 0;
                 sId = (sId + 1) & (NB_STACKS - 1);
 
-                // ctx->StartTimer(RC_TIMER_DIVIDE_TO_LEVELS);
+                ctx.StartTimer(RcTimerLabel.RC_TIMER_BUILD_REGIONS_LEVELS);
 
                 if (sId == 0)
                 {
@@ -1714,7 +1714,7 @@ namespace DotRecast.Recast
                     AppendStacks(lvlStacks[sId - 1], lvlStacks[sId], srcReg); // copy left overs from last level
                 }
 
-                // ctx->StopTimer(RC_TIMER_DIVIDE_TO_LEVELS);
+                ctx.StopTimer(RcTimerLabel.RC_TIMER_BUILD_REGIONS_LEVELS);
 
                 ctx.StartTimer(RcTimerLabel.RC_TIMER_BUILD_REGIONS_EXPAND);
 
@@ -1744,8 +1744,14 @@ namespace DotRecast.Recast
                 ctx.StopTimer(RcTimerLabel.RC_TIMER_BUILD_REGIONS_FLOOD);
             }
 
+            ctx.StartTimer(RcTimerLabel.RC_TIMER_BUILD_REGIONS_EXPAND_FINAL);
+
             // Expand current regions until no empty connected cells found.
+            // Note this runs with level 0, which bypasses the maxIter guard in
+            // ExpandRegions - it iterates to convergence, however long that takes.
             ExpandRegions(expandIters * 8, 0, chf, srcReg, srcDist, stack, true);
+
+            ctx.StopTimer(RcTimerLabel.RC_TIMER_BUILD_REGIONS_EXPAND_FINAL);
 
             ctx.StopTimer(RcTimerLabel.RC_TIMER_BUILD_REGIONS_WATERSHED);
             

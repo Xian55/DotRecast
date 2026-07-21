@@ -77,8 +77,16 @@ namespace DotRecast.Core
         /// The total time to apply the watershed algorithm. (See: #rcBuildRegions)
         public static readonly RcTimerLabel RC_TIMER_BUILD_REGIONS_WATERSHED = new RcTimerLabel(nameof(RC_TIMER_BUILD_REGIONS_WATERSHED));
 
+        /// The time to bucket cells into distance levels while applying the
+        /// watershed algorithm. (See: #rcBuildRegions)
+        public static readonly RcTimerLabel RC_TIMER_BUILD_REGIONS_LEVELS = new RcTimerLabel(nameof(RC_TIMER_BUILD_REGIONS_LEVELS));
+
         /// The time to expand regions while applying the watershed algorithm. (See: #rcBuildRegions)
         public static readonly RcTimerLabel RC_TIMER_BUILD_REGIONS_EXPAND = new RcTimerLabel(nameof(RC_TIMER_BUILD_REGIONS_EXPAND));
+
+        /// The time of the final unbounded region expansion that runs after the
+        /// watershed level loop. (See: #rcBuildRegions)
+        public static readonly RcTimerLabel RC_TIMER_BUILD_REGIONS_EXPAND_FINAL = new RcTimerLabel(nameof(RC_TIMER_BUILD_REGIONS_EXPAND_FINAL));
 
         /// The time to flood regions while applying the watershed algorithm. (See: #rcBuildRegions)
         public static readonly RcTimerLabel RC_TIMER_BUILD_REGIONS_FLOOD = new RcTimerLabel(nameof(RC_TIMER_BUILD_REGIONS_FLOOD));
