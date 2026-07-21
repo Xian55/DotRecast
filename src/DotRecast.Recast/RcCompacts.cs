@@ -18,7 +18,6 @@ freely, subject to the following restrictions:
 */
 
 using System;
-using System.Linq;
 using DotRecast.Core;
 
 namespace DotRecast.Recast
@@ -78,10 +77,8 @@ namespace DotRecast.Recast
             //chf.spans = new RcCompactSpan[spanCount];
             compactHeightfield.areas = new int[spanCount];
 
-            var tempSpans = Enumerable
-                .Range(0, spanCount)
-                .Select(x => RcCompactSpanBuilder.NewBuilder())
-                .ToArray();
+            // Value type, so the array itself is the storage - no per-span object.
+            RcCompactSpanBuilder[] tempSpans = new RcCompactSpanBuilder[spanCount];
 
             // Fill in cells and spans.
             int currentCellIndex = 0;
@@ -172,7 +169,13 @@ namespace DotRecast.Recast
                 throw new Exception($"rcBuildCompactHeightfield: Heightfield has too many layers {maxLayerIndex} (max: {MAX_LAYERS})");
             }
 
-            compactHeightfield.spans = tempSpans.Select(x => x.Build()).ToArray();
+            RcCompactSpan[] builtSpans = new RcCompactSpan[spanCount];
+            for (int i = 0; i < spanCount; ++i)
+            {
+                builtSpans[i] = tempSpans[i].Build();
+            }
+
+            compactHeightfield.spans = builtSpans;
 
             return compactHeightfield;
         }
