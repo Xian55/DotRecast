@@ -21,26 +21,39 @@ freely, subject to the following restrictions:
 namespace DotRecast.Recast
 {
     /** Represents a span of unobstructed space within a compact heightfield. */
+    ///
+    /// Eight bytes, matching the C++ original's bitfield layout. Four ints cost
+    /// sixteen, and there are hundreds of thousands of these per tile - they are
+    /// the largest single part of the compact heightfield's working set, and
+    /// every region, contour and detail pass sweeps them.
+    ///
+    /// The widths are ones the algorithm already assumes: RC_BORDER_REG is
+    /// 0x8000, so a region id has to fit in fifteen bits regardless; #con holds
+    /// four six-bit neighbour slots; and #h is the clearance above the span,
+    /// where 255 voxels is not distinguishable from more by any walkability
+    /// test - which is why the C++ original clamps it to a byte too.
     public readonly struct RcCompactSpan
     {
         /** The lower extent of the span. (Measured from the heightfield's base.) */
-        public readonly int y;
+        public readonly ushort y;
 
         /** The id of the region the span belongs to. (Or zero if not in a region.) */
-        public readonly int reg;
+        public readonly ushort reg;
+
+        /** Neighbour connections in the low 24 bits, height in the high 8. */
+        private readonly uint conh;
 
         /** Packed neighbor connection data. */
-        public readonly int con;
+        public int con => (int)(conh & 0x00ffffffu);
 
         /** The height of the span. (Measured from #y.) */
-        public readonly int h;
+        public int h => (int)(conh >> 24);
 
         public RcCompactSpan(RcCompactSpanBuilder span)
         {
-            y = span.y;
-            reg = span.reg;
-            con = span.con;
-            h = span.h;
+            y = (ushort)span.y;
+            reg = (ushort)span.reg;
+            conh = ((uint)span.con & 0x00ffffffu) | ((uint)span.h << 24);
         }
     }
 }

@@ -118,7 +118,7 @@ namespace DotRecast.Recast
                         int top = store[span].next != RcSpanStore.Nil ? (int)store[store[span].next].smin : MAX_HEIGHT;
                         ref RcCompactSpanBuilder builder = ref tempSpans[currentCellIndex];
                         builder.y = Math.Clamp(bot, 0, MAX_HEIGHT);
-                        builder.h = Math.Clamp(top - bot, 0, MAX_HEIGHT);
+                        builder.h = Math.Clamp(top - bot, 0, 0xff);
 
                         // Written explicitly rather than relying on zero-init:
                         // the backing array is pooled, so it arrives dirty.
