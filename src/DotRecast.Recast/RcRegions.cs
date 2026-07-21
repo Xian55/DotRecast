@@ -384,7 +384,8 @@ namespace DotRecast.Recast
             RcCompactHeightfield chf,
             int[] srcReg, int[] srcDist,
             List<RcLevelStackEntry> stack,
-            bool fillStack)
+            bool fillStack,
+            List<RcDirtyEntry> dirtyEntries)
         {
             int w = chf.width;
             int h = chf.height;
@@ -421,7 +422,8 @@ namespace DotRecast.Recast
                 }
             }
 
-            List<RcDirtyEntry> dirtyEntries = new List<RcDirtyEntry>();
+            // Caller-owned scratch: this used to allocate (and regrow to stack
+            // size) on every call, i.e. once per watershed level per tile.
             int iter = 0;
             while (stack.Count > 0)
             {
@@ -487,7 +489,7 @@ namespace DotRecast.Recast
                     srcDist[idx] = dirtyEntries[i].distance2;
                 }
 
-                if (failed == stack.Count())
+                if (failed == stack.Count)
                 {
                     break;
                 }
@@ -1667,6 +1669,9 @@ namespace DotRecast.Recast
 
             List<RcLevelStackEntry> stack = new List<RcLevelStackEntry>(256);
 
+            // Reused by every ExpandRegions call across all watershed levels.
+            List<RcDirtyEntry> dirtyEntries = new List<RcDirtyEntry>(256);
+
             int[] srcReg = new int[chf.spanCount];
             int[] srcDist = new int[chf.spanCount];
 
@@ -1719,7 +1724,7 @@ namespace DotRecast.Recast
                 ctx.StartTimer(RcTimerLabel.RC_TIMER_BUILD_REGIONS_EXPAND);
 
                 // Expand current regions until no empty connected cells found.
-                ExpandRegions(expandIters, level, chf, srcReg, srcDist, lvlStacks[sId], false);
+                ExpandRegions(expandIters, level, chf, srcReg, srcDist, lvlStacks[sId], false, dirtyEntries);
 
                 ctx.StopTimer(RcTimerLabel.RC_TIMER_BUILD_REGIONS_EXPAND);
 
@@ -1749,7 +1754,7 @@ namespace DotRecast.Recast
             // Expand current regions until no empty connected cells found.
             // Note this runs with level 0, which bypasses the maxIter guard in
             // ExpandRegions - it iterates to convergence, however long that takes.
-            ExpandRegions(expandIters * 8, 0, chf, srcReg, srcDist, stack, true);
+            ExpandRegions(expandIters * 8, 0, chf, srcReg, srcDist, stack, true, dirtyEntries);
 
             ctx.StopTimer(RcTimerLabel.RC_TIMER_BUILD_REGIONS_EXPAND_FINAL);
 
