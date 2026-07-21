@@ -277,11 +277,11 @@ namespace DotRecast.Recast
 
             using var timer = context.ScopedTimer(RcTimerLabel.RC_TIMER_MEDIAN_AREA);
 
-            int[] areas = compactHeightfield.Rent<int>(compactHeightfield.spanCount);
+            byte[] areas = compactHeightfield.Rent<byte>(compactHeightfield.spanCount);
 
             // Hoisted: these are class fields reloaded on every innermost access.
             // compactHeightfield.areas is only replaced after the whole loop.
-            int[] srcAreas = compactHeightfield.areas;
+            byte[] srcAreas = compactHeightfield.areas;
             RcCompactCell[] cells = compactHeightfield.cells;
             RcCompactSpan[] spans = compactHeightfield.spans;
 
@@ -298,7 +298,7 @@ namespace DotRecast.Recast
                     for (int spanIndex = cell.index; spanIndex < maxSpanIndex; ++spanIndex)
                     {
                         ref RcCompactSpan span = ref spans[spanIndex];
-                        int centerArea = srcAreas[spanIndex];
+                        byte centerArea = srcAreas[spanIndex];
                         if (centerArea == RC_NULL_AREA)
                         {
                             areas[spanIndex] = centerArea;
@@ -355,7 +355,7 @@ namespace DotRecast.Recast
                         }
 
                         neighborAreas.InsertSort();
-                        areas[spanIndex] = neighborAreas[4];
+                        areas[spanIndex] = (byte)neighborAreas[4];
                     }
                 }
             }
@@ -454,7 +454,7 @@ namespace DotRecast.Recast
                         }
 
                         // Mark the span.
-                        compactHeightfield.areas[spanIndex] = areaId.Apply(compactHeightfield.areas[spanIndex]);
+                        compactHeightfield.areas[spanIndex] = (byte)areaId.Apply(compactHeightfield.areas[spanIndex]);
                     }
                 }
             }
@@ -578,7 +578,7 @@ namespace DotRecast.Recast
 
                         if (PointInPoly(verts, point))
                         {
-                            compactHeightfield.areas[spanIndex] = areaId.Apply(compactHeightfield.areas[spanIndex]);
+                            compactHeightfield.areas[spanIndex] = (byte)areaId.Apply(compactHeightfield.areas[spanIndex]);
                         }
                     }
                 }
@@ -703,7 +703,7 @@ namespace DotRecast.Recast
                         // Mark if y extents overlap.
                         if (span.y >= miny && span.y <= maxy)
                         {
-                            compactHeightfield.areas[spanIndex] = areaId.Apply(compactHeightfield.areas[spanIndex]);
+                            compactHeightfield.areas[spanIndex] = (byte)areaId.Apply(compactHeightfield.areas[spanIndex]);
                         }
                     }
                 }

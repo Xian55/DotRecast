@@ -47,7 +47,7 @@ namespace DotRecast.Recast
 
             RcCompactCell[] cells = chf.cells;
             RcCompactSpan[] spans = chf.spans;
-            int[] areas = chf.areas;
+            byte[] areas = chf.areas;
             int w = chf.width;
 
             // Combine region and area codes in order to prevent

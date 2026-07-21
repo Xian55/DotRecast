@@ -81,7 +81,7 @@ namespace DotRecast.Recast
             // span counts, they die when the meshes are built, and several
             // tiles bake concurrently.
             compactHeightfield.cells = compactHeightfield.Rent<RcCompactCell>(xSize * zSize);
-            compactHeightfield.areas = compactHeightfield.Rent<int>(spanCount);
+            compactHeightfield.areas = compactHeightfield.Rent<byte>(spanCount);
 
             // Columns with no spans are left at index=0, count=0 below, so
             // this one does need clearing - a pooled array arrives dirty.
@@ -127,7 +127,7 @@ namespace DotRecast.Recast
                         builder.reg = 0;
                         builder.con = 0;
 
-                        compactHeightfield.areas[currentCellIndex] = store[span].area;
+                        compactHeightfield.areas[currentCellIndex] = (byte)store[span].area;
                         currentCellIndex++;
                         tmpCount++;
                     }

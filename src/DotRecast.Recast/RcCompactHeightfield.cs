@@ -55,7 +55,13 @@ namespace DotRecast.Recast
         public RcCompactCell[] cells;		// Array of cells. [Size: #width*#height]
         public RcCompactSpan[] spans;		// Array of spans. [Size: #spanCount]
         public int[] dist;		            // Array containing border distance data. [Size: #spanCount]
-        public int[] areas;		            // Array containing area id data. [Size: #spanCount]
+        /// Array containing area id data. [Size: #spanCount]
+        ///
+        /// One byte per span, matching the C++ original. Area ids are small
+        /// (RC_WALKABLE_AREA is 63) and this array is swept in a 3x3 stencil by
+        /// the median filter and read by every neighbour test in the region
+        /// build, so its width shows up directly in cache pressure.
+        public byte[] areas;
 
         private List<Array> pooled;
 
@@ -84,6 +90,9 @@ namespace DotRecast.Recast
                 {
                     case int[] a:
                         ArrayPool<int>.Shared.Return(a);
+                        break;
+                    case byte[] a:
+                        ArrayPool<byte>.Shared.Return(a);
                         break;
                     case RcCompactSpan[] a:
                         ArrayPool<RcCompactSpan>.Shared.Return(a);
