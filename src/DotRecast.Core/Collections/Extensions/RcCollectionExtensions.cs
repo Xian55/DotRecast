@@ -11,6 +11,13 @@ namespace DotRecast.Core.Collections.Extensions
         /// @param	dataLength	The number of elements in @p data
         public static void InsertSort(this int[] data)
         {
+            InsertSort(data.AsSpan());
+        }
+
+        /// Span overload so callers can sort stack-allocated scratch windows
+        /// without allocating an array per call.
+        public static void InsertSort(this Span<int> data)
+        {
             for (int valueIndex = 1; valueIndex < data.Length; valueIndex++)
             {
                 int value = data[valueIndex];
