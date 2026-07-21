@@ -749,16 +749,31 @@ namespace DotRecast.Recast
             ctx.StartTimer(RcTimerLabel.RC_TIMER_BUILD_CONTOURS_TRACE);
 
             // Mark boundaries.
+            //
+            // The arrays are hoisted out of the sweep because chf is a class:
+            // every chf.spans[..] is a field load the JIT cannot cache across
+            // the store to flags[i], and this loop performs six of them per
+            // span. The neighbour cell is reached by a constant offset from
+            // the current one - the four directions are exactly -1, +w, +1, -w
+            // - which replaces a multiply and two table reads per direction.
+            RcCompactCell[] cells = chf.cells;
+            RcCompactSpan[] spans = chf.spans;
+
+            Span<int> neighborOffset = stackalloc int[4] { -1, w, 1, -w };
+
             for (int y = 0; y < h; ++y)
             {
-                for (int x = 0; x < w; ++x)
+                int cellIndex = y * w;
+                for (int x = 0; x < w; ++x, ++cellIndex)
                 {
-                    ref RcCompactCell c = ref chf.cells[x + y * w];
+                    ref RcCompactCell c = ref cells[cellIndex];
                     for (int i = c.index, ni = c.index + c.count; i < ni; ++i)
                     {
                         int res = 0;
-                        ref RcCompactSpan s = ref chf.spans[i];
-                        if (chf.spans[i].reg == 0 || (chf.spans[i].reg & RC_BORDER_REG) != 0)
+                        ref RcCompactSpan s = ref spans[i];
+
+                        int reg = s.reg;
+                        if (reg == 0 || (reg & RC_BORDER_REG) != 0)
                         {
                             flags[i] = 0;
                             continue;
@@ -767,15 +782,13 @@ namespace DotRecast.Recast
                         for (int dir = 0; dir < 4; ++dir)
                         {
                             int r = 0;
-                            if (GetCon(s, dir) != RC_NOT_CONNECTED)
+                            int con = GetCon(s, dir);
+                            if (con != RC_NOT_CONNECTED)
                             {
-                                int ax = x + GetDirOffsetX(dir);
-                                int ay = y + GetDirOffsetY(dir);
-                                int ai = chf.cells[ax + ay * w].index + GetCon(s, dir);
-                                r = chf.spans[ai].reg;
+                                r = spans[cells[cellIndex + neighborOffset[dir]].index + con].reg;
                             }
 
-                            if (r == chf.spans[i].reg)
+                            if (r == reg)
                                 res |= (1 << dir);
                         }
 
