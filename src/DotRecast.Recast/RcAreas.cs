@@ -52,9 +52,10 @@ namespace DotRecast.Recast
             using var timer = context.ScopedTimer(RcTimerLabel.RC_TIMER_ERODE_AREA);
 
             int[] distanceToBoundary = new int[compactHeightfield.spanCount];
-            Array.Fill(distanceToBoundary, 255);
 
-            // Mark boundary cells.
+            // Mark boundary cells. The cells partition every span index exactly
+            // once, so seeding the array here folds away the separate Array.Fill
+            // sweep over the whole span set.
             for (int z = 0; z < zSize; ++z)
             {
                 for (int x = 0; x < xSize; ++x)
@@ -92,10 +93,7 @@ namespace DotRecast.Recast
                             }
 
                             // At least one missing neighbour, so this is a boundary cell.
-                            if (neighborCount != 4)
-                            {
-                                distanceToBoundary[spanIndex] = 0;
-                            }
+                            distanceToBoundary[spanIndex] = neighborCount != 4 ? 0 : 255;
                         }
                     }
                 }
@@ -171,7 +169,11 @@ namespace DotRecast.Recast
                 }
             }
 
-            // Pass 2
+            // Pass 2. This pass never reads areas, and each iteration finalises
+            // distanceToBoundary[i], so the erosion threshold is applied inline
+            // rather than in a second sweep over every span.
+            int minBoundaryDistance = erosionRadius * 2;
+
             for (int z = zSize - 1; z >= 0; --z)
             {
                 for (int x = xSize - 1; x >= 0; --x)
@@ -235,16 +237,12 @@ namespace DotRecast.Recast
                                 }
                             }
                         }
-                    }
-                }
-            }
 
-            int minBoundaryDistance = erosionRadius * 2;
-            for (int spanIndex = 0; spanIndex < compactHeightfield.spanCount; ++spanIndex)
-            {
-                if (distanceToBoundary[spanIndex] < minBoundaryDistance)
-                {
-                    compactHeightfield.areas[spanIndex] = RC_NULL_AREA;
+                        if (distanceToBoundary[i] < minBoundaryDistance)
+                        {
+                            compactHeightfield.areas[i] = RC_NULL_AREA;
+                        }
+                    }
                 }
             }
         }
