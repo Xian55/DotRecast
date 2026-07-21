@@ -77,9 +77,15 @@ namespace DotRecast.Recast
             compactHeightfield.bmax.Y += walkableHeight * heightfield.ch;
             compactHeightfield.cs = heightfield.cs;
             compactHeightfield.ch = heightfield.ch;
-            compactHeightfield.cells = new RcCompactCell[xSize * zSize];
-            //chf.spans = new RcCompactSpan[spanCount];
-            compactHeightfield.areas = new int[spanCount];
+            // Pooled: these three plus dist are ~10 MB per tile at realistic
+            // span counts, they die when the meshes are built, and several
+            // tiles bake concurrently.
+            compactHeightfield.cells = compactHeightfield.Rent<RcCompactCell>(xSize * zSize);
+            compactHeightfield.areas = compactHeightfield.Rent<int>(spanCount);
+
+            // Columns with no spans are left at index=0, count=0 below, so
+            // this one does need clearing - a pooled array arrives dirty.
+            Array.Clear(compactHeightfield.cells, 0, xSize * zSize);
 
             // Value type, so the array itself is the storage - no per-span object.
             // Pooled: at ~300k spans this is a ~5MB large-object allocation per
@@ -228,7 +234,7 @@ namespace DotRecast.Recast
                 throw new Exception($"rcBuildCompactHeightfield: Heightfield has too many layers {maxLayerIndex} (max: {MAX_LAYERS})");
             }
 
-            RcCompactSpan[] builtSpans = new RcCompactSpan[spanCount];
+            RcCompactSpan[] builtSpans = compactHeightfield.Rent<RcCompactSpan>(spanCount);
             for (int i = 0; i < spanCount; ++i)
             {
                 builtSpans[i] = tempSpans[i].Build();

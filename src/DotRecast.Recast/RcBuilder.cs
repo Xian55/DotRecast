@@ -228,6 +228,14 @@ namespace DotRecast.Recast
                 ? RcMeshDetails.BuildPolyMeshDetail(ctx, pmesh, chf, cfg.DetailSampleDist, cfg.DetailSampleMaxError)
                 : null;
 
+            if (!keepInterResults)
+            {
+                // Hands the compact heightfield's bulk arrays back to the pool.
+                // Only safe because nothing above it aliases them - the polygon
+                // and detail meshes own their own storage.
+                chf.Dispose();
+            }
+
             return new RcBuilderResult(
                 tileX,
                 tileZ,
@@ -296,6 +304,7 @@ namespace DotRecast.Recast
             RcCompactHeightfield chf = BuildCompactHeightfield(ctx, geom, builderCfg.cfg, solid);
 
             RcLayers.BuildHeightfieldLayers(ctx, chf, builderCfg.cfg.BorderSize, builderCfg.cfg.WalkableHeight, out var lset);
+            chf.Dispose();
             return lset;
         }
     }

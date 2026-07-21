@@ -277,7 +277,7 @@ namespace DotRecast.Recast
 
             using var timer = context.ScopedTimer(RcTimerLabel.RC_TIMER_MEDIAN_AREA);
 
-            int[] areas = new int[compactHeightfield.spanCount];
+            int[] areas = compactHeightfield.Rent<int>(compactHeightfield.spanCount);
 
             // Hoisted: these are class fields reloaded on every innermost access.
             // compactHeightfield.areas is only replaced after the whole loop.

@@ -210,7 +210,7 @@ namespace DotRecast.Recast
         {
             int w = chf.width;
             int h = chf.height;
-            int[] dst = new int[chf.spanCount];
+            int[] dst = chf.Rent<int>(chf.spanCount);
 
             thr *= 2;
 
@@ -1652,7 +1652,7 @@ namespace DotRecast.Recast
         {
             using var timer = ctx.ScopedTimer(RcTimerLabel.RC_TIMER_BUILD_DISTANCEFIELD);
 
-            int[] src = new int[chf.spanCount];
+            int[] src = chf.Rent<int>(chf.spanCount);
 
             ctx.StartTimer(RcTimerLabel.RC_TIMER_BUILD_DISTANCEFIELD_DIST);
             int maxDist = CalculateDistanceField(chf, src);
