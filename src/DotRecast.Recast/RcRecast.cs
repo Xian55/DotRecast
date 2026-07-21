@@ -1,4 +1,4 @@
-/*
+﻿/*
 Copyright (c) 2009-2010 Mikko Mononen memon@inside.org
 recast4j copyright (c) 2015-2019 Piotr Piastucki piotr@jtilia.org
 DotRecast Copyright (c) 2023-2024 Choi Ikpil ikpil@naver.com
@@ -19,6 +19,7 @@ freely, subject to the following restrictions:
 */
 
 using System;
+using System.Runtime.CompilerServices;
 using DotRecast.Core;
 using DotRecast.Core.Numerics;
 
@@ -97,9 +98,12 @@ namespace DotRecast.Recast
         /// @see rcPolyMesh::polys
         public const int RC_MESH_NULL_IDX = 0xffff;
 
-        private static readonly int[] DirOffsetX = { -1, 0, 1, 0, };
-        private static readonly int[] DirOffsetY = { 0, 1, 0, -1 };
-        private static readonly int[] DirForOffset = { 3, 0, -1, 2, 1 };
+        // Data-section spans rather than static readonly int[]: these are read
+        // tens of millions of times per tile, and this form removes the static
+        // field load and lets the JIT fold the bounds check.
+        private static ReadOnlySpan<sbyte> DirOffsetX => [-1, 0, 1, 0];
+        private static ReadOnlySpan<sbyte> DirOffsetY => [0, 1, 0, -1];
+        private static ReadOnlySpan<sbyte> DirForOffset => [3, 0, -1, 2, 1];
 
         /// Sets the neighbor connection data for the specified direction.
         /// @param[in]		span			The span to update.
@@ -125,6 +129,7 @@ namespace DotRecast.Recast
         /// Gets the standard width (x-axis) offset for the specified direction.
         /// @param[in]		direction		The direction. [Limits: 0 <= value < 4]
         /// @return The width offset to apply to the current cell position to move in the direction.
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static int GetDirOffsetX(int dir)
         {
             return DirOffsetX[dir & 0x03];
@@ -134,6 +139,7 @@ namespace DotRecast.Recast
         /// Gets the standard height (z-axis) offset for the specified direction.
         /// @param[in]		direction		The direction. [Limits: 0 <= value < 4]
         /// @return The height offset to apply to the current cell position to move in the direction.
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static int GetDirOffsetY(int dir)
         {
             return DirOffsetY[dir & 0x03];
