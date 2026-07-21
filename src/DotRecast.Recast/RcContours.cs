@@ -20,6 +20,9 @@ freely, subject to the following restrictions:
 
 using System;
 using System.Collections.Generic;
+#if NET5_0_OR_GREATER
+using System.Runtime.InteropServices;
+#endif
 using DotRecast.Core;
 
 namespace DotRecast.Recast
@@ -37,50 +40,61 @@ namespace DotRecast.Recast
             int ch = s.y;
             int dirp = (dir + 1) & 0x3;
 
-            int[] regs =
-            {
-                0, 0, 0, 0
-            };
+            // Four ints, not an int[]: this runs once per contour vertex,
+            // inside WalkContour's walk loop, and the array was a real heap
+            // allocation everywhere except .NET 9+ escape analysis.
+            Span<int> regs = stackalloc int[4] { 0, 0, 0, 0 };
+
+            RcCompactCell[] cells = chf.cells;
+            RcCompactSpan[] spans = chf.spans;
+            int[] areas = chf.areas;
+            int w = chf.width;
 
             // Combine region and area codes in order to prevent
             // border vertices which are in between two areas to be removed.
-            regs[0] = chf.spans[i].reg | (chf.areas[i] << 16);
+            regs[0] = spans[i].reg | (areas[i] << 16);
 
-            if (GetCon(s, dir) != RC_NOT_CONNECTED)
+            int con = GetCon(s, dir);
+            if (con != RC_NOT_CONNECTED)
             {
                 int ax = x + GetDirOffsetX(dir);
                 int ay = y + GetDirOffsetY(dir);
-                int ai = chf.cells[ax + ay * chf.width].index + GetCon(s, dir);
-                ref RcCompactSpan @as = ref chf.spans[ai];
+                int ai = cells[ax + ay * w].index + con;
+                ref RcCompactSpan @as = ref spans[ai];
                 ch = Math.Max(ch, @as.y);
-                regs[1] = chf.spans[ai].reg | (chf.areas[ai] << 16);
-                if (GetCon(@as, dirp) != RC_NOT_CONNECTED)
+                regs[1] = @as.reg | (areas[ai] << 16);
+
+                int con2 = GetCon(@as, dirp);
+                if (con2 != RC_NOT_CONNECTED)
                 {
                     int ax2 = ax + GetDirOffsetX(dirp);
                     int ay2 = ay + GetDirOffsetY(dirp);
-                    int ai2 = chf.cells[ax2 + ay2 * chf.width].index + GetCon(@as, dirp);
-                    ref RcCompactSpan as2 = ref chf.spans[ai2];
+                    int ai2 = cells[ax2 + ay2 * w].index + con2;
+                    ref RcCompactSpan as2 = ref spans[ai2];
                     ch = Math.Max(ch, as2.y);
-                    regs[2] = chf.spans[ai2].reg | (chf.areas[ai2] << 16);
+                    regs[2] = as2.reg | (areas[ai2] << 16);
                 }
             }
 
-            if (GetCon(s, dirp) != RC_NOT_CONNECTED)
+            con = GetCon(s, dirp);
+            if (con != RC_NOT_CONNECTED)
             {
                 int ax = x + GetDirOffsetX(dirp);
                 int ay = y + GetDirOffsetY(dirp);
-                int ai = chf.cells[ax + ay * chf.width].index + GetCon(s, dirp);
-                ref RcCompactSpan @as = ref chf.spans[ai];
+                int ai = cells[ax + ay * w].index + con;
+                ref RcCompactSpan @as = ref spans[ai];
                 ch = Math.Max(ch, @as.y);
-                regs[3] = chf.spans[ai].reg | (chf.areas[ai] << 16);
-                if (GetCon(@as, dir) != RC_NOT_CONNECTED)
+                regs[3] = @as.reg | (areas[ai] << 16);
+
+                int con2 = GetCon(@as, dir);
+                if (con2 != RC_NOT_CONNECTED)
                 {
                     int ax2 = ax + GetDirOffsetX(dir);
                     int ay2 = ay + GetDirOffsetY(dir);
-                    int ai2 = chf.cells[ax2 + ay2 * chf.width].index + GetCon(@as, dir);
-                    ref RcCompactSpan as2 = ref chf.spans[ai2];
+                    int ai2 = cells[ax2 + ay2 * w].index + con2;
+                    ref RcCompactSpan as2 = ref spans[ai2];
                     ch = Math.Max(ch, as2.y);
-                    regs[2] = chf.spans[ai2].reg | (chf.areas[ai2] << 16);
+                    regs[2] = as2.reg | (areas[ai2] << 16);
                 }
             }
 
@@ -147,11 +161,12 @@ namespace DotRecast.Recast
 
                     int r = 0;
                     ref RcCompactSpan s = ref chf.spans[i];
-                    if (GetCon(s, dir) != RC_NOT_CONNECTED)
+                    int con = GetCon(s, dir);
+                    if (con != RC_NOT_CONNECTED)
                     {
                         int ax = x + GetDirOffsetX(dir);
                         int ay = y + GetDirOffsetY(dir);
-                        int ai = chf.cells[ax + ay * chf.width].index + GetCon(s, dir);
+                        int ai = chf.cells[ax + ay * chf.width].index + con;
                         r = chf.spans[ai].reg;
                         if (area != chf.areas[ai])
                             isAreaBorder = true;
@@ -175,10 +190,11 @@ namespace DotRecast.Recast
                     int nx = x + GetDirOffsetX(dir);
                     int ny = y + GetDirOffsetY(dir);
                     ref RcCompactSpan s = ref chf.spans[i];
-                    if (GetCon(s, dir) != RC_NOT_CONNECTED)
+                    int con = GetCon(s, dir);
+                    if (con != RC_NOT_CONNECTED)
                     {
                         ref RcCompactCell nc = ref chf.cells[nx + ny * chf.width];
-                        ni = nc.index + GetCon(s, dir);
+                        ni = nc.index + con;
                     }
 
                     if (ni == -1)
@@ -204,9 +220,15 @@ namespace DotRecast.Recast
         {
             float pqx = qx - px;
             float pqz = qz - pz;
+            return DistancePtSeg(x, z, px, pz, pqx, pqz, pqx * pqx + pqz * pqz);
+        }
+
+        /// Same measure with the segment's own terms already computed - they do
+        /// not change while sweeping the raw points of one simplified edge.
+        private static float DistancePtSeg(int x, int z, int px, int pz, float pqx, float pqz, float d)
+        {
             float dx = x - px;
             float dz = z - pz;
-            float d = pqx * pqx + pqz * pqz;
             float t = pqx * dx + pqz * dz;
             if (d > 0)
                 t /= d;
@@ -219,6 +241,38 @@ namespace DotRecast.Recast
             dz = pz + t * pqz - z;
 
             return dx * dx + dz * dz;
+        }
+
+        /// Inserts one x/y/z/index point at a four-int-aligned offset, shifting
+        /// the tail exactly once.
+        private static void InsertPoint(List<int> list, int at, int x, int y, int z, int index)
+        {
+            list.Add(0);
+            list.Add(0);
+            list.Add(0);
+            list.Add(0);
+
+#if NET5_0_OR_GREATER
+            // One memmove of the tail. CollectionsMarshal is .NET 5+, and this
+            // project also targets netstandard2.1, hence the fallback.
+            Span<int> span = CollectionsMarshal.AsSpan(list);
+            span.Slice(at, span.Length - at - 4).CopyTo(span.Slice(at + 4));
+
+            span[at + 0] = x;
+            span[at + 1] = y;
+            span[at + 2] = z;
+            span[at + 3] = index;
+#else
+            for (int k = list.Count - 5; k >= at; --k)
+            {
+                list[k + 4] = list[k];
+            }
+
+            list[at + 0] = x;
+            list[at + 1] = y;
+            list[at + 2] = z;
+            list[at + 3] = index;
+#endif
         }
 
         private static void SimplifyContour(List<int> points, List<int> simplified, float maxError, int maxEdgeLen, int buildFlags)
@@ -344,9 +398,13 @@ namespace DotRecast.Recast
                 // Tessellate only outer edges or edges between areas.
                 if ((points[ci * 4 + 3] & RC_CONTOUR_REG_MASK) == 0 || (points[ci * 4 + 3] & RC_AREA_BORDER) != 0)
                 {
+                    float pqx = bx - ax;
+                    float pqz = bz - az;
+                    float segLenSq = pqx * pqx + pqz * pqz;
+
                     while (ci != endi)
                     {
-                        float d = DistancePtSeg(points[ci * 4 + 0], points[ci * 4 + 2], ax, az, bx, bz);
+                        float d = DistancePtSeg(points[ci * 4 + 0], points[ci * 4 + 2], ax, az, pqx, pqz, segLenSq);
                         if (d > maxd)
                         {
                             maxd = d;
@@ -361,11 +419,10 @@ namespace DotRecast.Recast
                 // add new point, else continue to next segment.
                 if (maxi != -1 && maxd > (maxError * maxError))
                 {
-                    // Add the point.
-                    simplified.Insert((i + 1) * 4 + 0, points[maxi * 4 + 0]);
-                    simplified.Insert((i + 1) * 4 + 1, points[maxi * 4 + 1]);
-                    simplified.Insert((i + 1) * 4 + 2, points[maxi * 4 + 2]);
-                    simplified.Insert((i + 1) * 4 + 3, maxi);
+                    // Add the point. Inserting the four fields one at a time
+                    // memmoves the whole tail four times.
+                    InsertPoint(simplified, (i + 1) * 4,
+                        points[maxi * 4 + 0], points[maxi * 4 + 1], points[maxi * 4 + 2], maxi);
                 }
                 else
                 {
@@ -431,10 +488,8 @@ namespace DotRecast.Recast
                     if (maxi != -1)
                     {
                         // Add the point.
-                        simplified.Insert((i + 1) * 4 + 0, points[maxi * 4 + 0]);
-                        simplified.Insert((i + 1) * 4 + 1, points[maxi * 4 + 1]);
-                        simplified.Insert((i + 1) * 4 + 2, points[maxi * 4 + 2]);
-                        simplified.Insert((i + 1) * 4 + 3, maxi);
+                        InsertPoint(simplified, (i + 1) * 4,
+                            points[maxi * 4 + 0], points[maxi * 4 + 1], points[maxi * 4 + 2], maxi);
                     }
                     else
                     {
