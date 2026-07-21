@@ -20,6 +20,7 @@ freely, subject to the following restrictions:
 
 using System;
 using System.Collections.Generic;
+using System.Threading.Tasks;
 using DotRecast.Core;
 using DotRecast.Core.Numerics;
 
@@ -90,7 +91,7 @@ namespace DotRecast.Recast
             return float.MaxValue;
         }
 
-        public static float DistancePtSeg(float[] verts, int pt, int p, int q)
+        public static float DistancePtSeg(ReadOnlySpan<float> verts, int pt, int p, int q)
         {
             float pqx = verts[q + 0] - verts[p + 0];
             float pqy = verts[q + 1] - verts[p + 1];
@@ -507,7 +508,7 @@ namespace DotRecast.Recast
             return nfaces;
         }
 
-        public static void DelaunayHull(RcContext ctx, int npts, float[] pts, int nhull, int[] hull, List<int> tris)
+        public static void DelaunayHull(RcContext ctx, int npts, float[] pts, int nhull, ReadOnlySpan<int> hull, List<int> tris)
         {
             int nfaces = 0;
             int maxEdges = npts * 10;
@@ -628,7 +629,7 @@ namespace DotRecast.Recast
             return MathF.Sqrt(minDist);
         }
 
-        public static void TriangulateHull(int nverts, float[] verts, int nhull, int[] hull, int nin, List<int> tris)
+        public static void TriangulateHull(int nverts, float[] verts, int nhull, ReadOnlySpan<int> hull, int nin, List<int> tris)
         {
             int start = 0, left = 1, right = nhull - 1;
 
@@ -719,8 +720,8 @@ namespace DotRecast.Recast
             const int MAX_VERTS = 127;
             const int MAX_TRIS = 255; // Max tris for delaunay is 2n-2-k (n=num verts, k=num hull verts).
             const int MAX_VERTS_PER_EDGE = 32;
-            float[] edge = new float[(MAX_VERTS_PER_EDGE + 1) * 3];
-            int[] hull = new int[MAX_VERTS];
+            Span<float> edge = stackalloc float[(MAX_VERTS_PER_EDGE + 1) * 3];
+            Span<int> hull = stackalloc int[MAX_VERTS];
             int nhull = 0;
 
             int nverts = nin;
@@ -796,7 +797,7 @@ namespace DotRecast.Recast
                     }
 
                     // Simplify samples.
-                    int[] idx = new int[MAX_VERTS_PER_EDGE];
+                    Span<int> idx = stackalloc int[MAX_VERTS_PER_EDGE];
                     idx[0] = 0;
                     idx[1] = nn;
                     int nidx = 2;
@@ -995,7 +996,7 @@ namespace DotRecast.Recast
             return nverts;
         }
 
-        public static bool OnHull(int a, int b, int nhull, int[] hull)
+        public static bool OnHull(int a, int b, int nhull, ReadOnlySpan<int> hull)
         {
             // All internal sampled points come after the hull so we can early out for those.
             if (a >= nhull || b >= nhull)
@@ -1011,7 +1012,7 @@ namespace DotRecast.Recast
         }
 
         // Find edges that lie on hull and mark them as such.
-        public static void SetTriFlags(List<int> tris, int nhull, int[] hull)
+        public static void SetTriFlags(List<int> tris, int nhull, ReadOnlySpan<int> hull)
         {
             // Matches DT_DETAIL_EDGE_BOUNDARY
             const int DETAIL_EDGE_BOUNDARY = 0x1;
@@ -1036,7 +1037,7 @@ namespace DotRecast.Recast
             // Note: Reads to the compact heightfield are offset by border size (bs)
             // since border size offset is already removed from the polymesh vertices.
 
-            int[] offset = { 0, 0, -1, -1, 0, -1, 1, -1, 1, 0, 1, 1, 0, 1, -1, 1, -1, 0, };
+            ReadOnlySpan<sbyte> offset = [0, 0, -1, -1, 0, -1, 1, -1, 1, 0, 1, 1, 0, 1, -1, 1, -1, 0];
 
             // Find cell closest to a poly vertex
             int startCellX = 0, startCellY = 0, startSpanIndex = -1;
@@ -1084,7 +1085,7 @@ namespace DotRecast.Recast
             array.Add(startCellX);
             array.Add(startCellY);
             array.Add(startSpanIndex);
-            int[] dirs = { 0, 1, 2, 3 };
+            Span<int> dirs = stackalloc int[] { 0, 1, 2, 3 };
             Array.Fill(hp.data, 0, 0, (hp.width * hp.height) - (0));
             // DFS to move to the center. Note that we need a DFS here and can not just move
             // directly towards the center without recording intermediate nodes, even though the polygons
@@ -1278,7 +1279,7 @@ namespace DotRecast.Recast
                 if (head >= RETRACT_SIZE)
                 {
                     head = 0;
-                    queue = queue.GetRange(RETRACT_SIZE * 3, queue.Count - (RETRACT_SIZE * 3));
+                    queue.RemoveRange(0, RETRACT_SIZE * 3);
                 }
 
                 ref RcCompactSpan cs = ref chf.spans[ci];
@@ -1335,17 +1336,10 @@ namespace DotRecast.Recast
             int borderSize = mesh.borderSize;
             int heightSearchRadius = (int)Math.Max(1, MathF.Ceiling(mesh.maxEdgeError));
 
-            List<int> edges = new List<int>(64);
-            List<int> tris = new List<int>(512);
-            List<int> arr = new List<int>(512);
-            List<int> samples = new List<int>(512);
-            float[] verts = new float[256 * 3];
-            RcHeightPatch hp = new RcHeightPatch();
             int nPolyVerts = 0;
             int maxhw = 0, maxhh = 0;
 
             int[] bounds = new int[mesh.npolys * 4];
-            float[] poly = new float[nvp * 3];
 
             // Find max size for a polygon area.
             for (int i = 0; i < mesh.npolys; ++i)
@@ -1383,8 +1377,6 @@ namespace DotRecast.Recast
                 maxhh = Math.Max(maxhh, bounds[i * 4 + 3] - bounds[i * 4 + 2]);
             }
 
-            hp.data = new int[maxhw * maxhh];
-
             dmesh.nmeshes = mesh.npolys;
             dmesh.nverts = 0;
             dmesh.ntris = 0;
@@ -1398,58 +1390,97 @@ namespace DotRecast.Recast
             dmesh.ntris = 0;
             dmesh.tris = new int[tcap * 4];
 
-            for (int i = 0; i < mesh.npolys; ++i)
-            {
-                int p = i * nvp * 2;
+            // Each polygon's detail mesh depends only on read-only inputs (mesh,
+            // chf, bounds) plus thread-local scratch, so the expensive part runs
+            // in parallel. Results are collected per index and appended in index
+            // order below, which keeps the output byte-identical to the
+            // sequential build.
+            PolyDetailResult[] results = new PolyDetailResult[mesh.npolys];
 
-                // Store polygon vertices for processing.
-                int npoly = 0;
-                for (int j = 0; j < nvp; ++j)
+            Parallel.For(
+                0, mesh.npolys,
+                () => new PolyDetailScratch(nvp, maxhw, maxhh),
+                (i, _, scratch) =>
                 {
-                    if (mesh.polys[p + j] == RC_MESH_NULL_IDX)
+                    int p = i * nvp * 2;
+                    float[] poly = scratch.Poly;
+
+                    // Store polygon vertices for processing.
+                    int npoly = 0;
+                    for (int j = 0; j < nvp; ++j)
                     {
-                        break;
+                        if (mesh.polys[p + j] == RC_MESH_NULL_IDX)
+                        {
+                            break;
+                        }
+
+                        int v = mesh.polys[p + j] * 3;
+                        poly[j * 3 + 0] = mesh.verts[v + 0] * cs;
+                        poly[j * 3 + 1] = mesh.verts[v + 1] * ch;
+                        poly[j * 3 + 2] = mesh.verts[v + 2] * cs;
+                        npoly++;
                     }
 
-                    int v = mesh.polys[p + j] * 3;
-                    poly[j * 3 + 0] = mesh.verts[v + 0] * cs;
-                    poly[j * 3 + 1] = mesh.verts[v + 1] * ch;
-                    poly[j * 3 + 2] = mesh.verts[v + 2] * cs;
-                    npoly++;
-                }
+                    // Get the height data from the area of the polygon.
+                    RcHeightPatch hp = scratch.HeightPatch;
+                    hp.xmin = bounds[i * 4 + 0];
+                    hp.ymin = bounds[i * 4 + 2];
+                    hp.width = bounds[i * 4 + 1] - bounds[i * 4 + 0];
+                    hp.height = bounds[i * 4 + 3] - bounds[i * 4 + 2];
 
-                // Get the height data from the area of the polygon.
-                hp.xmin = bounds[i * 4 + 0];
-                hp.ymin = bounds[i * 4 + 2];
-                hp.width = bounds[i * 4 + 1] - bounds[i * 4 + 0];
-                hp.height = bounds[i * 4 + 3] - bounds[i * 4 + 2];
-                GetHeightData(ctx, chf, mesh.polys, p, npoly, mesh.verts, borderSize, ref hp, ref arr, mesh.regs[i]);
+                    List<int> arr = scratch.Arr;
+                    GetHeightData(ctx, chf, mesh.polys, p, npoly, mesh.verts, borderSize, ref hp, ref arr, mesh.regs[i]);
+                    scratch.Arr = arr;
 
-                // Build detail mesh.
-                int nverts = BuildPolyDetail(ctx, poly, npoly,
-                    sampleDist, sampleMaxError,
-                    heightSearchRadius, chf, hp,
-                    verts, ref tris,
-                    ref edges, ref samples);
+                    // Build detail mesh.
+                    List<int> tris = scratch.Tris;
+                    List<int> edges = scratch.Edges;
+                    List<int> samples = scratch.Samples;
+                    float[] verts = scratch.Verts;
 
-                // Move detail verts to world space.
-                for (int j = 0; j < nverts; ++j)
-                {
-                    verts[j * 3 + 0] += orig.X;
-                    verts[j * 3 + 1] += orig.Y + chf.ch; // Is this offset necessary? See
-                    verts[j * 3 + 2] += orig.Z;
-                }
+                    int nverts = BuildPolyDetail(ctx, poly, npoly,
+                        sampleDist, sampleMaxError,
+                        heightSearchRadius, chf, hp,
+                        verts, ref tris,
+                        ref edges, ref samples);
 
-                // Offset poly too, will be used to flag checking.
-                for (int j = 0; j < npoly; ++j)
-                {
-                    poly[j * 3 + 0] += orig.X;
-                    poly[j * 3 + 1] += orig.Y;
-                    poly[j * 3 + 2] += orig.Z;
-                }
+                    scratch.Tris = tris;
+                    scratch.Edges = edges;
+                    scratch.Samples = samples;
 
-                // Store detail submesh.
-                int ntris = tris.Count / 4;
+                    // Move detail verts to world space.
+                    for (int j = 0; j < nverts; ++j)
+                    {
+                        verts[j * 3 + 0] += orig.X;
+                        verts[j * 3 + 1] += orig.Y + chf.ch; // Is this offset necessary? See
+                        verts[j * 3 + 2] += orig.Z;
+                    }
+
+                    int ntrisLocal = tris.Count / 4;
+
+                    // Snapshot into per-index storage; the scratch buffers are
+                    // reused by the next polygon on this thread.
+                    float[] vertsCopy = new float[nverts * 3];
+                    Array.Copy(verts, vertsCopy, nverts * 3);
+
+                    int[] trisCopy = new int[ntrisLocal * 4];
+                    for (int j = 0; j < ntrisLocal * 4; ++j)
+                    {
+                        trisCopy[j] = tris[j];
+                    }
+
+                    results[i] = new PolyDetailResult(vertsCopy, nverts, trisCopy, ntrisLocal);
+                    return scratch;
+                },
+                _ => { });
+
+            for (int i = 0; i < mesh.npolys; ++i)
+            {
+                PolyDetailResult result = results[i];
+                int nverts = result.NVerts;
+                int ntris = result.NTris;
+                float[] verts = result.Verts;
+                int[] tris = result.Tris;
 
                 dmesh.meshes[i * 4 + 0] = dmesh.nverts;
                 dmesh.meshes[i * 4 + 1] = nverts;
@@ -1510,6 +1541,50 @@ namespace DotRecast.Recast
             }
 
             return dmesh;
+        }
+
+        /// Per-polygon output of the parallel detail build, merged in index order.
+        private readonly struct PolyDetailResult
+        {
+            public readonly float[] Verts;
+            public readonly int NVerts;
+            public readonly int[] Tris;
+            public readonly int NTris;
+
+            public PolyDetailResult(float[] verts, int nverts, int[] tris, int ntris)
+            {
+                Verts = verts;
+                NVerts = nverts;
+                Tris = tris;
+                NTris = ntris;
+            }
+        }
+
+        /// Thread-local buffers for the parallel detail build - one set per worker,
+        /// reused across the polygons that worker handles.
+        private sealed class PolyDetailScratch
+        {
+            public readonly float[] Poly;
+            public readonly float[] Verts;
+            public readonly RcHeightPatch HeightPatch;
+            public List<int> Tris;
+            public List<int> Edges;
+            public List<int> Samples;
+            public List<int> Arr;
+
+            public PolyDetailScratch(int nvp, int maxhw, int maxhh)
+            {
+                Poly = new float[nvp * 3];
+                Verts = new float[256 * 3];
+                HeightPatch = new RcHeightPatch
+                {
+                    data = new int[Math.Max(1, maxhw * maxhh)]
+                };
+                Tris = new List<int>(512);
+                Edges = new List<int>(64);
+                Samples = new List<int>(512);
+                Arr = new List<int>(512);
+            }
         }
 
         /// @see rcAllocPolyMeshDetail, rcPolyMeshDetail
