@@ -141,7 +141,7 @@ namespace DotRecast.Recast
             while (i != -1)
             {
                 int v = i * 3;
-                if (verts[v + 0] == x && (MathF.Abs(verts[v + 1] - y) <= 2) && verts[v + 2] == z)
+                if (verts[v + 0] == x && (Math.Abs(verts[v + 1] - y) <= 2) && verts[v + 2] == z)
                     return i;
                 i = nextVert[i]; // next
             }
@@ -197,21 +197,22 @@ namespace DotRecast.Recast
         // intersection is ensured by using strict leftness.
         private static bool IntersectProp(ReadOnlySpan<int> verts, int a, int b, int c, int d)
         {
+            int abc = Area2(verts, a, b, c);
+            int abd = Area2(verts, a, b, d);
+            int cda = Area2(verts, c, d, a);
+            int cdb = Area2(verts, c, d, b);
+
             // Eliminate improper cases.
-            if (Collinear(verts, a, b, c) || Collinear(verts, a, b, d) || Collinear(verts, c, d, a)
-                || Collinear(verts, c, d, b))
+            if (abc == 0 || abd == 0 || cda == 0 || cdb == 0)
                 return false;
 
-            return (Left(verts, a, b, c) ^ Left(verts, a, b, d)) && (Left(verts, c, d, a) ^ Left(verts, c, d, b));
+            return ((abc < 0) ^ (abd < 0)) && ((cda < 0) ^ (cdb < 0));
         }
 
-        // Returns T iff (a,b,c) are collinear and point c lies
-        // on the closed segment ab.
-        private static bool Between(ReadOnlySpan<int> verts, int a, int b, int c)
+        // Returns T iff point c lies on the closed segment ab, given that
+        // (a,b,c) are already known to be collinear.
+        private static bool BetweenCollinear(ReadOnlySpan<int> verts, int a, int b, int c)
         {
-            if (!Collinear(verts, a, b, c))
-                return false;
-
             // If ab not vertical, check betweenness on x; else on y.
             if (verts[a + 0] != verts[b + 0])
                 return ((verts[a + 0] <= verts[c + 0]) && (verts[c + 0] <= verts[b + 0])) ||
@@ -224,14 +225,26 @@ namespace DotRecast.Recast
         // Returns true iff segments ab and cd intersect, properly or improperly.
         public static bool Intersect(ReadOnlySpan<int> verts, int a, int b, int c, int d)
         {
-            if (IntersectProp(verts, a, b, c, d))
-                return true;
+            // Four determinants decide the whole question. The original shape
+            // evaluated them up to three times each - once as Collinear, once
+            // as Left, once more inside Between - which made Area2 the hottest
+            // routine in the polygon build.
+            int abc = Area2(verts, a, b, c);
+            int abd = Area2(verts, a, b, d);
+            int cda = Area2(verts, c, d, a);
+            int cdb = Area2(verts, c, d, b);
 
-            if (Between(verts, a, b, c) || Between(verts, a, b, d) ||
-                Between(verts, c, d, a) || Between(verts, c, d, b))
-                return true;
+            // Proper intersection: no three points collinear, and each segment
+            // strictly separates the other's endpoints.
+            if (abc != 0 && abd != 0 && cda != 0 && cdb != 0)
+            {
+                return ((abc < 0) ^ (abd < 0)) && ((cda < 0) ^ (cdb < 0));
+            }
 
-            return false;
+            return (abc == 0 && BetweenCollinear(verts, a, b, c))
+                || (abd == 0 && BetweenCollinear(verts, a, b, d))
+                || (cda == 0 && BetweenCollinear(verts, c, d, a))
+                || (cdb == 0 && BetweenCollinear(verts, c, d, b));
         }
 
         public static bool VEqual(ReadOnlySpan<int> verts, int a, int b)
@@ -490,7 +503,7 @@ namespace DotRecast.Recast
             for (int i = 0; i < na; ++i)
             {
                 int va0 = polys[pa + i];
-                int va1 = polys[pa + (i + 1) % na];
+                int va1 = polys[pa + (i + 1 == na ? 0 : i + 1)];
                 if (va0 > va1)
                 {
                     (va0, va1) = (va1, va0);
@@ -499,7 +512,7 @@ namespace DotRecast.Recast
                 for (int j = 0; j < nb; ++j)
                 {
                     int vb0 = polys[pb + j];
-                    int vb1 = polys[pb + (j + 1) % nb];
+                    int vb1 = polys[pb + (j + 1 == nb ? 0 : j + 1)];
                     if (vb0 > vb1)
                     {
                         (vb0, vb1) = (vb1, vb0);
@@ -521,20 +534,20 @@ namespace DotRecast.Recast
             // Check to see if the merged polygon would be convex.
             int va, vb, vc;
 
-            va = polys[pa + (ea + na - 1) % na];
+            va = polys[pa + (ea == 0 ? na - 1 : ea - 1)];
             vb = polys[pa + ea];
-            vc = polys[pb + (eb + 2) % nb];
+            vc = polys[pb + (eb + 2 < nb ? eb + 2 : eb + 2 - nb)];
             if (!Uleft(verts, va * 3, vb * 3, vc * 3))
                 return -1;
 
-            va = polys[pb + (eb + nb - 1) % nb];
+            va = polys[pb + (eb == 0 ? nb - 1 : eb - 1)];
             vb = polys[pb + eb];
-            vc = polys[pa + (ea + 2) % na];
+            vc = polys[pa + (ea + 2 < na ? ea + 2 : ea + 2 - na)];
             if (!Uleft(verts, va * 3, vb * 3, vc * 3))
                 return -1;
 
             va = polys[pa + ea];
-            vb = polys[pa + (ea + 1) % na];
+            vb = polys[pa + (ea + 1 == na ? 0 : ea + 1)];
 
             int dx = verts[va * 3 + 0] - verts[vb * 3 + 0];
             int dy = verts[va * 3 + 2] - verts[vb * 3 + 2];
@@ -553,14 +566,16 @@ namespace DotRecast.Recast
             // Add pa
             for (int i = 0; i < na - 1; ++i)
             {
-                polys[tmp + n] = polys[pa + (ea + 1 + i) % na];
+                int ia = ea + 1 + i;
+                polys[tmp + n] = polys[pa + (ia < na ? ia : ia - na)];
                 n++;
             }
 
             // Add pb
             for (int i = 0; i < nb - 1; ++i)
             {
-                polys[tmp + n] = polys[pb + (eb + 1 + i) % nb];
+                int ib = eb + 1 + i;
+                polys[tmp + n] = polys[pb + (ib < nb ? ib : ib - nb)];
                 n++;
             }
 
