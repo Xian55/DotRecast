@@ -42,7 +42,12 @@ namespace DotRecast.Recast
             int nextEdge = nverts;
             int edgeCount = 0;
 
-            RcEdge[] edges = new RcEdge[maxEdgeCount];
+            // Edges as a flat struct-of-ints instead of RcEdge objects: the class
+            // form cost four allocations per edge (the object plus its three
+            // int[2] fields), i.e. tens of thousands per tile.
+            // Layout per edge, stride EdgeStride: v0, v1, poly0, poly1, polyEdge0, polyEdge1.
+            const int EdgeStride = 6;
+            int[] edges = new int[maxEdgeCount * EdgeStride];
 
             for (int i = 0; i < nverts; i++)
                 firstEdge[i] = RC_MESH_NULL_IDX;
@@ -60,14 +65,13 @@ namespace DotRecast.Recast
                         : polys[t + j + 1];
                     if (v0 < v1)
                     {
-                        RcEdge edge = new RcEdge();
-                        edges[edgeCount] = edge;
-                        edge.vert[0] = v0;
-                        edge.vert[1] = v1;
-                        edge.poly[0] = i;
-                        edge.polyEdge[0] = j;
-                        edge.poly[1] = i;
-                        edge.polyEdge[1] = 0;
+                        int e = edgeCount * EdgeStride;
+                        edges[e + 0] = v0;
+                        edges[e + 1] = v1;
+                        edges[e + 2] = i;
+                        edges[e + 4] = j;
+                        edges[e + 3] = i;
+                        edges[e + 5] = 0;
                         // Insert edge
                         firstEdge[nextEdge + edgeCount] = firstEdge[v0];
                         firstEdge[v0] = edgeCount;
@@ -91,11 +95,11 @@ namespace DotRecast.Recast
                     {
                         for (int e = firstEdge[v1]; e != RC_MESH_NULL_IDX; e = firstEdge[nextEdge + e])
                         {
-                            RcEdge edge = edges[e];
-                            if (edge.vert[1] == v0 && edge.poly[0] == edge.poly[1])
+                            int edge = e * EdgeStride;
+                            if (edges[edge + 1] == v0 && edges[edge + 2] == edges[edge + 3])
                             {
-                                edge.poly[1] = i;
-                                edge.polyEdge[1] = j;
+                                edges[edge + 3] = i;
+                                edges[edge + 5] = j;
                                 break;
                             }
                         }
@@ -106,13 +110,15 @@ namespace DotRecast.Recast
             // Store adjacency
             for (int i = 0; i < edgeCount; ++i)
             {
-                RcEdge e = edges[i];
-                if (e.poly[0] != e.poly[1])
+                int e = i * EdgeStride;
+                int poly0 = edges[e + 2];
+                int poly1 = edges[e + 3];
+                if (poly0 != poly1)
                 {
-                    int p0 = e.poly[0] * vertsPerPoly * 2;
-                    int p1 = e.poly[1] * vertsPerPoly * 2;
-                    polys[p0 + vertsPerPoly + e.polyEdge[0]] = e.poly[1];
-                    polys[p1 + vertsPerPoly + e.polyEdge[1]] = e.poly[0];
+                    int p0 = poly0 * vertsPerPoly * 2;
+                    int p1 = poly1 * vertsPerPoly * 2;
+                    polys[p0 + vertsPerPoly + edges[e + 4]] = poly1;
+                    polys[p1 + vertsPerPoly + edges[e + 5]] = poly0;
                 }
             }
         }
@@ -163,7 +169,7 @@ namespace DotRecast.Recast
             return i + 1 < n ? i + 1 : 0;
         }
 
-        private static int Area2(int[] verts, int a, int b, int c)
+        private static int Area2(ReadOnlySpan<int> verts, int a, int b, int c)
         {
             return (verts[b + 0] - verts[a + 0]) * (verts[c + 2] - verts[a + 2])
                    - (verts[c + 0] - verts[a + 0]) * (verts[b + 2] - verts[a + 2]);
@@ -171,17 +177,17 @@ namespace DotRecast.Recast
 
         // Returns true iff c is strictly to the left of the directed
         // line through a to b.
-        public static bool Left(int[] verts, int a, int b, int c)
+        public static bool Left(ReadOnlySpan<int> verts, int a, int b, int c)
         {
             return Area2(verts, a, b, c) < 0;
         }
 
-        public static bool LeftOn(int[] verts, int a, int b, int c)
+        public static bool LeftOn(ReadOnlySpan<int> verts, int a, int b, int c)
         {
             return Area2(verts, a, b, c) <= 0;
         }
 
-        private static bool Collinear(int[] verts, int a, int b, int c)
+        private static bool Collinear(ReadOnlySpan<int> verts, int a, int b, int c)
         {
             return Area2(verts, a, b, c) == 0;
         }
@@ -189,7 +195,7 @@ namespace DotRecast.Recast
         // Returns true iff ab properly intersects cd: they share
         // a point interior to both segments. The properness of the
         // intersection is ensured by using strict leftness.
-        private static bool IntersectProp(int[] verts, int a, int b, int c, int d)
+        private static bool IntersectProp(ReadOnlySpan<int> verts, int a, int b, int c, int d)
         {
             // Eliminate improper cases.
             if (Collinear(verts, a, b, c) || Collinear(verts, a, b, d) || Collinear(verts, c, d, a)
@@ -201,7 +207,7 @@ namespace DotRecast.Recast
 
         // Returns T iff (a,b,c) are collinear and point c lies
         // on the closed segment ab.
-        private static bool Between(int[] verts, int a, int b, int c)
+        private static bool Between(ReadOnlySpan<int> verts, int a, int b, int c)
         {
             if (!Collinear(verts, a, b, c))
                 return false;
@@ -216,7 +222,7 @@ namespace DotRecast.Recast
         }
 
         // Returns true iff segments ab and cd intersect, properly or improperly.
-        public static bool Intersect(int[] verts, int a, int b, int c, int d)
+        public static bool Intersect(ReadOnlySpan<int> verts, int a, int b, int c, int d)
         {
             if (IntersectProp(verts, a, b, c, d))
                 return true;
@@ -228,7 +234,7 @@ namespace DotRecast.Recast
             return false;
         }
 
-        public static bool VEqual(int[] verts, int a, int b)
+        public static bool VEqual(ReadOnlySpan<int> verts, int a, int b)
         {
             return verts[a + 0] == verts[b + 0] && verts[a + 2] == verts[b + 2];
         }
