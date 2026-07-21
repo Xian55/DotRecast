@@ -505,6 +505,181 @@ namespace DotRecast.Recast
             }
         }
 
+        /// <summary>
+        /// Level-bucketed span index for the watershed level loop.
+        ///
+        /// Stock recast rescans every column of the heightfield each time the
+        /// level loop wraps (once per 8 levels) purely to pick out the spans
+        /// whose distance falls in the current window. On a 510x510 tile that
+        /// is ~30 full sweeps over a few hundred thousand spans. Bucketing the
+        /// spans by level window once up front turns each sweep into a walk of
+        /// the single window that matters, plus a running "carry" of the spans
+        /// above the window that are still unassigned.
+        ///
+        /// Ordering is preserved exactly. The index is built in the original
+        /// scan order - which is ascending span index, since RcBuildCompactHeightfield
+        /// numbers spans over the same y-then-x column order - and every list
+        /// stays sorted by span index through the merges, so each level stack
+        /// comes out identical to the full-scan version, entry for entry.
+        ///
+        /// Pruning the carry is safe because srcReg never returns to 0 between
+        /// rounds: ExpandRegions skips spans that already have a region and only
+        /// ever writes a non-zero one, and FloodRegion's reset clears only spans
+        /// that same call had just claimed.
+        /// </summary>
+        private sealed class RcWatershedLevelIndex
+        {
+            private readonly List<RcLevelStackEntry>[] windows;
+            private readonly int anchorLevel;
+            private readonly int[] dist;
+
+            private List<RcLevelStackEntry> carry = new List<RcLevelStackEntry>(256);
+            private List<RcLevelStackEntry> carryNext = new List<RcLevelStackEntry>(256);
+            private readonly List<RcLevelStackEntry> topLevel = new List<RcLevelStackEntry>(256);
+            private readonly List<RcLevelStackEntry> lowerLevels = new List<RcLevelStackEntry>(256);
+
+            public RcWatershedLevelIndex(RcCompactHeightfield chf, int[] srcReg, int anchorLevel, int nbStacks)
+            {
+                this.anchorLevel = anchorLevel;
+                this.dist = chf.dist;
+
+                windows = new List<RcLevelStackEntry>[Math.Max(1, (anchorLevel / nbStacks) + 2)];
+                for (int i = 0; i < windows.Length; ++i)
+                {
+                    windows[i] = new List<RcLevelStackEntry>();
+                }
+
+                int w = chf.width;
+                int h = chf.height;
+
+                for (int y = 0; y < h; ++y)
+                {
+                    for (int x = 0; x < w; ++x)
+                    {
+                        ref RcCompactCell c = ref chf.cells[x + y * w];
+                        for (int i = c.index, ni = c.index + c.count; i < ni; ++i)
+                        {
+                            if (chf.areas[i] == RC_NULL_AREA || srcReg[i] != 0)
+                            {
+                                continue;
+                            }
+
+                            int level = dist[i] >> 1;
+
+                            // Above the first window the loop will ever ask for:
+                            // these are the sId<0 clamp cases, so they start out
+                            // in the carry.
+                            if (level > anchorLevel)
+                            {
+                                carry.Add(new RcLevelStackEntry(x, y, i));
+                                continue;
+                            }
+
+                            int m = (anchorLevel - level) / nbStacks;
+                            if (m < windows.Length)
+                            {
+                                windows[m].Add(new RcLevelStackEntry(x, y, i));
+                            }
+                        }
+                    }
+                }
+            }
+
+            /// <summary>
+            /// Fills the level stacks for one window, identically to a full
+            /// SortCellsByLevel scan at the same startLevel.
+            /// </summary>
+            public void Fill(int startLevel, int[] srcReg, List<List<RcLevelStackEntry>> stacks, int nbStacks)
+            {
+                for (int j = 0; j < nbStacks; ++j)
+                {
+                    stacks[j].Clear();
+                }
+
+                PruneAssigned(carry, srcReg);
+
+                topLevel.Clear();
+                lowerLevels.Clear();
+
+                int m = (anchorLevel - startLevel) / nbStacks;
+                if (m >= 0 && m < windows.Length)
+                {
+                    List<RcLevelStackEntry> window = windows[m];
+                    for (int k = 0; k < window.Count; ++k)
+                    {
+                        RcLevelStackEntry e = window[k];
+                        if (srcReg[e.index] != 0)
+                        {
+                            continue;
+                        }
+
+                        int s = startLevel - (dist[e.index] >> 1);
+                        if (s <= 0)
+                        {
+                            topLevel.Add(e);
+                        }
+                        else if (s < nbStacks)
+                        {
+                            stacks[s].Add(e);
+                            lowerLevels.Add(e);
+                        }
+                    }
+                }
+
+                // Stack 0 also absorbs everything still unassigned above the
+                // window - that is the sId<0 clamp in the original scan.
+                Merge(carry, topLevel, stacks[0]);
+
+                // Next window's carry is everything emitted this round.
+                Merge(stacks[0], lowerLevels, carryNext);
+                (carry, carryNext) = (carryNext, carry);
+            }
+
+            private static void PruneAssigned(List<RcLevelStackEntry> list, int[] srcReg)
+            {
+                int write = 0;
+                for (int read = 0; read < list.Count; ++read)
+                {
+                    if (srcReg[list[read].index] == 0)
+                    {
+                        list[write++] = list[read];
+                    }
+                }
+
+                list.RemoveRange(write, list.Count - write);
+            }
+
+            /// <summary>Merges two span-index-ascending lists into dst.</summary>
+            private static void Merge(List<RcLevelStackEntry> a, List<RcLevelStackEntry> b, List<RcLevelStackEntry> dst)
+            {
+                if (ReferenceEquals(a, dst))
+                {
+                    // Only happens for the stacks[0] self-merge below; handled
+                    // by the caller ordering, kept as a guard.
+                    throw new ArgumentException("dst must differ from a", nameof(dst));
+                }
+
+                dst.Clear();
+
+                int i = 0;
+                int j = 0;
+                while (i < a.Count && j < b.Count)
+                {
+                    dst.Add(a[i].index <= b[j].index ? a[i++] : b[j++]);
+                }
+
+                while (i < a.Count)
+                {
+                    dst.Add(a[i++]);
+                }
+
+                while (j < b.Count)
+                {
+                    dst.Add(b[j++]);
+                }
+            }
+        }
+
         private static void SortCellsByLevel(int startLevel,
             RcCompactHeightfield chf,
             int[] srcReg,
@@ -1702,6 +1877,13 @@ namespace DotRecast.Recast
 
             chf.borderSize = borderSize;
 
+            // Anchor on the first startLevel the loop below will ask for, so
+            // the precomputed windows line up with it exactly - level drops by
+            // 2 per iteration and 8 iterations per wrap, so startLevel drops by
+            // exactly 8 between refills.
+            RcWatershedLevelIndex levelIndex =
+                new RcWatershedLevelIndex(chf, srcReg, (level >= 2 ? level - 2 : 0) >> 1, NB_STACKS);
+
             int sId = -1;
             while (level > 0)
             {
@@ -1712,7 +1894,7 @@ namespace DotRecast.Recast
 
                 if (sId == 0)
                 {
-                    SortCellsByLevel(level, chf, srcReg, NB_STACKS, lvlStacks, 1);
+                    levelIndex.Fill(level >> 1, srcReg, lvlStacks, NB_STACKS);
                 }
                 else
                 {
