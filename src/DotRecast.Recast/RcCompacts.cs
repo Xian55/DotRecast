@@ -1,4 +1,4 @@
-/*
+﻿/*
 recast4j copyright (c) 2021 Piotr Piastucki piotr@jtilia.org
 DotRecast Copyright (c) 2023-2024 Choi Ikpil ikpil@naver.com
 
@@ -128,7 +128,7 @@ namespace DotRecast.Recast
 
                         for (int dir = 0; dir < 4; ++dir)
                         {
-                            SetCon(s, dir, RC_NOT_CONNECTED);
+                            SetCon(ref s, dir, RC_NOT_CONNECTED);
                             int neighborX = x + GetDirOffsetX(dir);
                             int neighborZ = z + GetDirOffsetY(dir);
                             // First check that the neighbour cell is in bounds.
@@ -158,7 +158,7 @@ namespace DotRecast.Recast
                                         continue;
                                     }
 
-                                    SetCon(s, dir, layerIndex);
+                                    SetCon(ref s, dir, layerIndex);
                                     break;
                                 }
                             }

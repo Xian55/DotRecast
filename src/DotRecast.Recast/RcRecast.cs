@@ -1,4 +1,4 @@
-﻿/*
+/*
 Copyright (c) 2009-2010 Mikko Mononen memon@inside.org
 recast4j copyright (c) 2015-2019 Piotr Piastucki piotr@jtilia.org
 DotRecast Copyright (c) 2023-2024 Choi Ikpil ikpil@naver.com
@@ -109,7 +109,7 @@ namespace DotRecast.Recast
         /// @param[in]		span			The span to update.
         /// @param[in]		direction		The direction to set. [Limits: 0 <= value < 4]
         /// @param[in]		neighborIndex	The index of the neighbor span.
-        public static void SetCon(RcCompactSpanBuilder span, int direction, int neighborIndex)
+        public static void SetCon(ref RcCompactSpanBuilder span, int direction, int neighborIndex)
         {
             int shift = direction * 6;
             int con = span.con;
