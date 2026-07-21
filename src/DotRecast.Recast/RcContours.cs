@@ -470,7 +470,7 @@ namespace DotRecast.Recast
         private static bool IntersectSegContour(int d0, int d1, int i, int n, int[] verts, int[] d0verts, int[] d1verts)
         {
             // For each edge (k,k+1) of P
-            int[] pverts = new int[4 * 4];
+            Span<int> pverts = stackalloc int[4 * 4];
             for (int g = 0; g < 4; g++)
             {
                 pverts[g] = d0verts[d0 + g];
@@ -511,7 +511,7 @@ namespace DotRecast.Recast
             int pi = i * 4;
             int pi1 = RcMeshs.Next(i, n) * 4;
             int pin1 = RcMeshs.Prev(i, n) * 4;
-            int[] pverts = new int[4 * 4];
+            Span<int> pverts = stackalloc int[4 * 4];
             for (int g = 0; g < 4; g++)
             {
                 pverts[g] = verts[pi + g];
